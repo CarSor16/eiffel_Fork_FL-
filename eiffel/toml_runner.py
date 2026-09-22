@@ -52,6 +52,8 @@ MODELS = {
     "p4p_mlp": "p4p_mlp",
     "cnn1d": "cnn1d",
     "ft_transformer": "ft_transformer",
+    "stress_mlp": "stress_mlp",
+    "synthetic_mlp": "stress_mlp",
 }
 
 MODEL_ATTACKS = {
@@ -220,9 +222,22 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
     overrides.append(f"model={hydra_model}")
     if "learning_rate" in training:
         overrides.append(f"++model.learning_rate={float(training['learning_rate'])}")
-    for key in ("dropout", "d_token", "n_heads", "n_blocks", "ff_factor"):
+    for key in (
+        "dropout",
+        "d_token",
+        "n_heads",
+        "n_blocks",
+        "ff_factor",
+        "hidden1",
+        "hidden2",
+        "weight_decay",
+    ):
         if key in model:
             overrides.append(f"++model.{key}={_quote_hydra(model[key])}")
+    if "adam_beta1" in training:
+        overrides.append(f"++model.beta1={float(training['adam_beta1'])}")
+    if "adam_beta2" in training:
+        overrides.append(f"++model.beta2={float(training['adam_beta2'])}")
 
     # Partitioning.
     partition_type = str(partition.get("type", "iid")).lower()
