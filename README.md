@@ -241,6 +241,18 @@ If `.venv\Scripts\Activate.ps1` does not exist, the virtual environment has not 
 .\setup.cmd
 ```
 
+If the doctor reports `ModuleNotFoundError: No module named 'absl'`, the TensorFlow dependency set was only partially installed. The current setup installs the TensorFlow/Flower runtime explicitly before installing Eiffel, runs `pip check`, and verifies `absl-py` during the final import test.
+
+If Python prints an error while processing `protobuf-3.19.6-...-nspkg.pth`, pull the latest branch and rebuild. TensorFlow 2.10 requires protobuf below 3.20, and protobuf 3.19.6 ships a legacy namespace `.pth` file. The setup removes that obsolete compatibility file after installation; Python 3.10 can use the `google` namespace package without it.
+
+Recovery:
+
+```powershell
+git pull origin feature/fl-security-lab
+.\setup.cmd -Force
+.\run.cmd -Doctor
+```
+
 If the setup import check fails with `ModuleNotFoundError: No module named 'pkg_resources'`, the cause is an overly new Setuptools release. Setuptools removed `pkg_resources` in version 82.0.0, while Ray 2.6.3 still imports it. The supported environment therefore pins:
 
 ```text
