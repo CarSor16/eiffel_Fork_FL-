@@ -441,6 +441,38 @@ model_attack=sign_flip
 
 ---
 
+## TOML experiment workflow
+
+The previous Flower attack lab used one TOML file per experiment. This fork keeps that workflow while Eiffel continues to use Hydra internally.
+
+Runnable profiles are stored in:
+
+```text
+experiments/toml/
+```
+
+For example:
+
+```powershell
+.\run-toml.ps1 experiments\toml\smoke_sign_flip.toml
+```
+
+or:
+
+```powershell
+python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml
+```
+
+To validate the profile and inspect the generated Eiffel/Hydra command without starting the simulation:
+
+```powershell
+python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml --dry-run
+```
+
+The compatibility layer supports the current attack set, temporal schedules, model choice, Dirichlet non-IID partitioning, HDF5 storage, and NF-V2 dataset aliases. The old synthetic-stress profiles have been adapted to Eiffel-compatible NF-V2 experiments rather than silently pretending the old synthetic results are reproducible on a different runtime.
+
+See [docs/TOML_EXPERIMENTS.md](docs/TOML_EXPERIMENTS.md) for the complete mapping and supported fields.
+
 ## Configuration
 
 Eiffel uses Hydra.
