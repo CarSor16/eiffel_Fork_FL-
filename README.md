@@ -204,6 +204,33 @@ Typical run artifacts include `stats.json`, Hydra's `.hydra/` configuration file
 
 Because the default HDF5 path is relative, `round_state.h5` is written inside the corresponding Hydra run directory.
 
+### Dependency versions used by the supported Windows setup
+
+The setup intentionally pins the core runtime because Eiffel's original dependency ranges are too broad for a modern `pip` resolver.
+
+The supported Python 3.10 environment uses:
+
+```text
+TensorFlow   2.10.0
+Flower       1.5.0
+Ray          2.6.3
+cryptography 41.0.4
+protobuf     3.19.6
+NumPy        1.23.5
+fsspec       2023.10.0
+pydantic     1.10.17
+```
+
+The exact constraints are stored in:
+
+```text
+constraints-py310.txt
+```
+
+`setup.cmd` installs the project using those constraints. This prevents `pip` from selecting a much newer Flower release whose cryptography/protobuf requirements are incompatible with the Eiffel-era stack.
+
+The repository's historical `poetry.lock` is not used by the standard Windows setup. The supported path is `setup.cmd` / `pip` plus `constraints-py310.txt`.
+
 ### Troubleshooting
 
 If `py -3.10` reports that no suitable runtime exists, install Python 3.10 with the `winget` command above and reopen the terminal.
@@ -213,6 +240,15 @@ If `.venv\Scripts\Activate.ps1` does not exist, the virtual environment has not 
 ```powershell
 .\setup.cmd
 ```
+
+If installation fails with `ResolutionImpossible` and mentions Flower / cryptography / protobuf, first pull the latest branch and rebuild the virtual environment:
+
+```powershell
+git pull origin feature/fl-security-lab
+.\setup.cmd -Force
+```
+
+Do not manually install the newest Flower release into this environment. The project currently targets Flower 1.5.0 for compatibility with the Eiffel codebase and TensorFlow 2.10 stack.
 
 If the environment becomes inconsistent, rebuild it:
 
