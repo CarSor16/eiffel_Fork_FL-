@@ -119,6 +119,7 @@ def _client_probabilities(
     seed: int,
     base: np.ndarray,
     dirichlet_alpha: float,
+    partition_mode: str,
     rare_class_id: int,
     rare_specialist_client: int,
     rare_specialist_strength: float,
@@ -127,10 +128,17 @@ def _client_probabilities(
         raise ValueError("dirichlet_alpha must be > 0")
 
     rng = np.random.default_rng(seed + 1_003 * client_id)
-    concentration = np.maximum(
-        base * dirichlet_alpha * len(base), 0.025
-    )
-    probabilities = rng.dirichlet(concentration)
+    if partition_mode == "iid":
+        probabilities = base.copy()
+    elif partition_mode == "dirichlet":
+        concentration = np.maximum(
+            base * dirichlet_alpha * len(base), 0.025
+        )
+        probabilities = rng.dirichlet(concentration)
+    else:
+        raise ValueError(
+            "Synthetic stress partition_mode must be 'iid' or 'dirichlet'."
+        )
 
     if client_id == rare_specialist_client:
         focus = np.zeros(len(base), dtype=np.float64)
@@ -276,6 +284,7 @@ def load_data(
     central_shift_std: float = 0.10,
     outlier_fraction: float = 0.012,
     dirichlet_alpha: float = 0.5,
+    partition_mode: str = "dirichlet",
     key: str = "synthetic_stress_50k",
     _default_target: Sequence[str] | None = None,
     **kwargs,
@@ -315,6 +324,7 @@ def load_data(
             seed=seed,
             base=base,
             dirichlet_alpha=dirichlet_alpha,
+            partition_mode=partition_mode,
             rare_class_id=rare_class_id,
             rare_specialist_client=rare_specialist_client,
             rare_specialist_strength=rare_specialist_strength,
