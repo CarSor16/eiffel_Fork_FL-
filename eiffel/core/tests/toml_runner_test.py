@@ -72,3 +72,32 @@ def test_model_scaling_uses_scale_factor():
     overrides = profile_to_overrides(profile)
     assert "model_attack=scaling" in overrides
     assert "model_attack.scale_factor=12.0" in overrides
+
+
+
+def test_synthetic_50k_translation():
+    profile = {
+        "experiment": {"seed": 2026, "num_clients": 10, "rounds": 5},
+        "dataset": {
+            "name": "synthetic_stress",
+            "samples_per_client": 5000,
+            "central_test_size": 12000,
+            "num_features": 32,
+        },
+        "partition": {"type": "dirichlet", "dirichlet_alpha": 0.5},
+        "model": {"name": "stress_mlp", "hidden1": 64, "hidden2": 32},
+        "training": {"local_epochs": 1, "learning_rate": 0.001},
+        "attack": {"mechanism": "none", "malicious_fraction": 0.0},
+        "aggregation": {"name": "fedavg"},
+    }
+
+    overrides = profile_to_overrides(profile)
+
+    assert "+datasets=synthetic/stress" in overrides
+    assert "datasets.synthetic_stress.num_clients=10" in overrides
+    assert "datasets.synthetic_stress.samples_per_client=5000" in overrides
+    assert "datasets.synthetic_stress.central_test_size=12000" in overrides
+    assert "datasets.synthetic_stress.partition_mode=dirichlet" in overrides
+    assert "datasets.synthetic_stress.dirichlet_alpha=0.5" in overrides
+    assert "partitioner=preassigned" in overrides
+    assert "model=stress_mlp" in overrides
