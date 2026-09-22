@@ -208,6 +208,13 @@ class Experiment:
             strategy = FedAvg()
 
         if isinstance(strategy, partial):
+            strategy_name = getattr(strategy.func, "__name__", "")
+            capture_inference = (
+                strategy_name == "InstrumentedFedAvg"
+                and storage is not None
+                and bool(storage.get("enabled", True))
+                and bool(storage.get("capture_inference", True))
+            )
             self.strategy = strategy(
                 min_fit_clients=self.n_clients,
                 min_evaluate_clients=self.n_clients,
@@ -215,10 +222,7 @@ class Experiment:
                 on_fit_config_fn=mk_config_fn({
                     "batch_size": batch_size,
                     "num_epochs": num_epochs,
-                    "capture_inference": bool(
-                        storage.get("enabled", True)
-                        and storage.get("capture_inference", True)
-                    ) if storage is not None else False,
+                    "capture_inference": capture_inference,
                     "probe_size": int(storage.get("probe_size", 256))
                     if storage is not None else 256,
                 }),
