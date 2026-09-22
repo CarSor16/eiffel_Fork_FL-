@@ -67,7 +67,7 @@ class RoundStore:
             del group[name]
         arr = np.asarray(value, dtype=np.dtype(dtype))
         kwargs = {}
-        if self.compression and arr.size > 0:
+        if self.compression and arr.size > 0 and arr.ndim > 0:
             kwargs["compression"] = self.compression
             if self.compression == "gzip":
                 kwargs["compression_opts"] = self.compression_level
