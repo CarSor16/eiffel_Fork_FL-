@@ -93,7 +93,7 @@ try {
     if ($Doctor) {
         Write-Host "Eiffel FL Security Lab - doctor"
         Write-Host ""
-        & $Python -c "import sys, tensorflow, flwr, hydra, h5py, eiffel; assert sys.version_info[:2] == (3,10), sys.version; print('Python:', sys.version.split()[0]); print('TensorFlow:', tensorflow.__version__); print('Flower:', flwr.__version__); print('h5py:', h5py.__version__); print('Imports: OK')"
+        & $Python -c "import sys, tensorflow, flwr, hydra, h5py, numpy, google.protobuf, eiffel; assert sys.version_info[:2] == (3,10), sys.version; assert tensorflow.__version__.startswith('2.10.'), tensorflow.__version__; assert flwr.__version__ == '1.5.0', flwr.__version__; print('Python:', sys.version.split()[0]); print('TensorFlow:', tensorflow.__version__); print('Flower:', flwr.__version__); print('NumPy:', numpy.__version__); print('Protobuf:', google.protobuf.__version__); print('h5py:', h5py.__version__); print('Imports: OK')"
         if ($LASTEXITCODE -ne 0) { throw "Environment import check failed." }
 
         $DoctorProfile = Resolve-Profile "synthetic_50k_quick_clean"
