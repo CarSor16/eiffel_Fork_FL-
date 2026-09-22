@@ -80,6 +80,7 @@ class Experiment:
         strategy: partial[Strategy] | Strategy | None = None,
         server: Server | None = None,
         partitioner: Partitioner | DictConfig | None = None,
+        storage: dict | DictConfig | None = None,
     ):
         """Initialize the experiment.
 
@@ -214,6 +215,12 @@ class Experiment:
                 on_fit_config_fn=mk_config_fn({
                     "batch_size": batch_size,
                     "num_epochs": num_epochs,
+                    "capture_inference": bool(
+                        storage.get("enabled", True)
+                        and storage.get("capture_inference", True)
+                    ) if storage is not None else False,
+                    "probe_size": int(storage.get("probe_size", 256))
+                    if storage is not None else 256,
                 }),
                 evaluate_metrics_aggregation_fn=aggregate_metrics_fn,
                 fit_metrics_aggregation_fn=aggregate_metrics_fn,
