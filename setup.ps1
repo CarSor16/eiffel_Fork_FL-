@@ -22,17 +22,25 @@ Windows:
 "@
 }
 
-& py -3.10 --version *> $null
-if ($LASTEXITCODE -ne 0) {
-    throw @"
-Python 3.10 is not installed or is not visible to the Python Launcher.
+$Python310 = $null
+try {
+    $Python310 = (& py -3.10 -c "import sys; print(sys.executable)" 2>$null)
+} catch {
+    $Python310 = $null
+}
 
-Install it with:
-  winget install -e --id Python.Python.3.10
-
-Then reopen the terminal and verify:
-  py -0p
-"@
+if (-not $Python310) {
+    Write-Host ""
+    Write-Host "Python 3.10 was not found." -ForegroundColor Yellow
+    Write-Host "Detected Python installations:"
+    & py -0p
+    Write-Host ""
+    Write-Host "Install Python 3.10 with:" -ForegroundColor Yellow
+    Write-Host "  winget install -e --id Python.Python.3.10"
+    Write-Host ""
+    Write-Host "Then close and reopen the terminal and run:"
+    Write-Host "  .\setup.cmd"
+    exit 1
 }
 
 if ($Force -and (Test-Path $Venv)) {
