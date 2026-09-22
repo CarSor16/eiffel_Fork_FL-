@@ -46,8 +46,19 @@ def attack_strength_for_round(
         active = max(1, int(schedule.get("active_rounds", 1)))
         return 1.0 if ((server_round - start) % period) < active else 0.0
     if kind == "gradual":
-        ramp = max(1, int(schedule.get("ramp_rounds", 5)))
-        return float(min(1.0, (server_round - start + 1) / ramp))
+        ramp = max(
+            1,
+            int(
+                schedule.get(
+                    "ramp_rounds",
+                    max(1, end - start + 1) if end < 10**9 else 5,
+                )
+            ),
+        )
+        progress = min(1.0, max(0.0, (server_round - start) / max(1, ramp - 1)))
+        initial = float(schedule.get("gradual_start_strength", 0.0))
+        final = float(schedule.get("gradual_end_strength", 1.0))
+        return float(initial + (final - initial) * progress)
     raise ValueError(f"Unsupported model-attack schedule: {kind}")
 
 
