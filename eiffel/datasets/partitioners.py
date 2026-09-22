@@ -259,3 +259,88 @@ class NIIDClassPartitioner(Partitioner):
             # When both `n_drop` and `n_keep` are 0, the partitioner behaves like an
             # IIDPartitioner.
             self.partitions = parts
+
+
+class DirichletPartitioner(Partitioner):
+    """Class-wise Dirichlet non-IID partitioner.
+
+    For each value of class_column this partitioner samples client proportions
+    from a Dirichlet distribution and assigns that class accordingly. Lower alpha
+    values create stronger label skew; larger values approach an IID allocation.
+    """
+
+    def __init__(
+        self,
+        *args,
+        class_column: str,
+        alpha: float = 0.5,
+        min_partition_size: int = 1,
+        df_key: str = "m",
+        max_retries: int = 100,
+        **kwargs,
+    ) -> None:
+        if alpha <= 0:
+            raise ValueError("Dirichlet alpha must be > 0.")
+        if min_partition_size < 1:
+            raise ValueError("min_partition_size must be >= 1.")
+        self.class_column = class_column
+        self.alpha = float(alpha)
+        self.min_partition_size = int(min_partition_size)
+        self.df_key = df_key
+        self.max_retries = int(max_retries)
+        super().__init__(*args, **kwargs)
+
+    def _partition(self, dataset: Dataset) -> None:
+        if not hasattr(dataset, self.df_key):
+            raise KeyError(
+                f"Dataset does not contain a DataFrame with key {self.df_key}"
+            )
+
+        metadata = getattr(dataset, self.df_key)
+        if self.class_column not in metadata.columns:
+            raise KeyError(
+                f"Dataset does not contain a column named {self.class_column}"
+            )
+
+        labels = metadata[self.class_column].to_numpy()
+        rng = np.random.default_rng(self.seed)
+        all_classes = np.unique(labels)
+
+        assignments: list[list[int]] | None = None
+        for _ in range(self.max_retries):
+            candidate = [[] for _ in range(self.n_partitions)]
+            for label in all_classes:
+                class_idx = np.flatnonzero(labels == label)
+                rng.shuffle(class_idx)
+                proportions = rng.dirichlet(
+                    np.full(self.n_partitions, self.alpha, dtype=float)
+                )
+                counts = rng.multinomial(len(class_idx), proportions)
+                offset = 0
+                for client_idx, count in enumerate(counts):
+                    if count:
+                        candidate[client_idx].extend(
+                            class_idx[offset : offset + count].tolist()
+                        )
+                    offset += count
+
+            if min(map(len, candidate), default=0) >= self.min_partition_size:
+                assignments = candidate
+                break
+
+        if assignments is None:
+            raise RuntimeError(
+                "Unable to produce Dirichlet partitions satisfying "
+                f"min_partition_size={self.min_partition_size} after "
+                f"{self.max_retries} attempts."
+            )
+
+        self.partitions = []
+        for indices in assignments:
+            idx = np.asarray(indices, dtype=int)
+            rng.shuffle(idx)
+            part = dataset.copy()
+            part.X = dataset.X.iloc[idx].copy()
+            part.y = dataset.y.iloc[idx].copy()
+            part.m = dataset.m.iloc[idx].copy()
+            self.partitions.append(part)
