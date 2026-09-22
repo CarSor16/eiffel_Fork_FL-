@@ -12,7 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import math
+import json
 import shlex
 import subprocess
 import sys
@@ -245,10 +245,8 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         else:
             overrides.append("attacks.0.type=targeted")
             if target is not None:
-                if isinstance(target, (list, tuple)):
-                    target_value = "[" + ",".join(str(v) for v in target) + "]"
-                else:
-                    target_value = f"[{target}]"
+                values = list(target) if isinstance(target, (list, tuple)) else [target]
+                target_value = json.dumps(values, separators=(",", ":"))
                 overrides.append(f"++attacks.0.target={target_value}")
         return overrides
 
