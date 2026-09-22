@@ -100,7 +100,28 @@ class Pool:
 
         if not isinstance(dataset, Dataset):
             dataset = call(dataset)
-        _test, _train = dataset.split(at=test_ratio, seed=self.seed)
+
+        # Synthetic/replay datasets can provide an explicit train/test split in
+        # metadata. This preserves an exact federated training sample count and a
+        # separate common test distribution instead of randomly re-splitting them.
+        if "Split" in dataset.m.columns and set(dataset.m["Split"].unique()) >= {
+            "train",
+            "test",
+        }:
+            train_mask = dataset.m["Split"] == "train"
+            test_mask = dataset.m["Split"] == "test"
+
+            _train = dataset.copy()
+            _train.X = dataset.X.loc[train_mask].copy()
+            _train.y = dataset.y.loc[train_mask].copy()
+            _train.m = dataset.m.loc[train_mask].copy()
+
+            _test = dataset.copy()
+            _test.X = dataset.X.loc[test_mask].copy()
+            _test.y = dataset.y.loc[test_mask].copy()
+            _test.m = dataset.m.loc[test_mask].copy()
+        else:
+            _test, _train = dataset.split(at=test_ratio, seed=self.seed)
 
         if not partitioner:
             partitioner = DumbPartitioner
