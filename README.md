@@ -241,6 +241,21 @@ If `.venv\Scripts\Activate.ps1` does not exist, the virtual environment has not 
 .\setup.cmd
 ```
 
+If the setup import check fails with `ModuleNotFoundError: No module named 'pkg_resources'`, the cause is an overly new Setuptools release. Setuptools removed `pkg_resources` in version 82.0.0, while Ray 2.6.3 still imports it. The supported environment therefore pins:
+
+```text
+setuptools==80.9.0
+```
+
+Pull the latest branch and rebuild the environment:
+
+```powershell
+git pull origin feature/fl-security-lab
+.\setup.cmd -Force
+```
+
+The CUDA warning about `cudart64_110.dll` can be ignored on a CPU-only machine; TensorFlow explicitly continues without CUDA when the DLL is unavailable.
+
 If installation fails with a Ray / PyArrow conflict, make sure you are on the latest branch version. The supported setup intentionally installs plain `ray==2.6.3`, **without** Ray's `data` extra: that extra requires an old PyArrow range incompatible with the dataset stack. The project pins `pyarrow==16.1.0`, which has a CPython 3.10 Windows wheel and is compatible with the NF-V2 pandas loader.
 
 If installation fails with `ResolutionImpossible` and mentions Flower / cryptography / protobuf, first pull the latest branch and rebuild the virtual environment:
