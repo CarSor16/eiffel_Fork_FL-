@@ -1,0 +1,31 @@
+# @package datasets.synthetic_stress
+_target_: eiffel.datasets.synthetic_stress.load_data
+
+seed: ${seed}
+num_clients: 10
+samples_per_client: 5000
+central_test_size: 12000
+
+num_features: 32
+num_classes: 6
+rare_class_id: 3
+rare_class_probability: 0.025
+rare_specialist_client: 0
+rare_specialist_strength: 0.25
+
+feature_noise: 0.60
+latent_dim: 10
+informative_features: 16
+redundant_features: 8
+class_separation: 1.80
+latent_noise: 0.90
+secondary_mode_probability: 0.35
+hard_example_fraction: 0.12
+train_label_noise: 0.01
+client_shift_std: 0.18
+central_shift_std: 0.10
+outlier_fraction: 0.012
+dirichlet_alpha: 0.5
+
+key: synthetic_stress_50k
+_default_target: [Botnet]
