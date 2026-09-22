@@ -182,10 +182,10 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         ) from exc
     overrides.append(f"model={hydra_model}")
     if "learning_rate" in training:
-        overrides.append(f"+model.learning_rate={float(training['learning_rate'])}")
+        overrides.append(f"++model.learning_rate={float(training['learning_rate'])}")
     for key in ("dropout", "d_token", "n_heads", "n_blocks", "ff_factor"):
         if key in model:
-            overrides.append(f"+model.{key}={_quote_hydra(model[key])}")
+            overrides.append(f"++model.{key}={_quote_hydra(model[key])}")
 
     # Partitioning.
     partition_type = str(partition.get("type", "iid")).lower()
@@ -249,7 +249,7 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
                     target_value = "[" + ",".join(str(v) for v in target) + "]"
                 else:
                     target_value = f"[{target}]"
-                overrides.append(f"+attacks.0.target={target_value}")
+                overrides.append(f"++attacks.0.target={target_value}")
         return overrides
 
     try:
@@ -299,26 +299,26 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         )
     end_round = int(schedule.get("end_round", 0) or 0)
     if end_round > 0:
-        overrides.append(f"+model_attack.schedule.end_round={end_round}")
+        overrides.append(f"++model_attack.schedule.end_round={end_round}")
 
     if schedule_type == "on_off":
         on_rounds = int(schedule.get("on_rounds", schedule.get("active_rounds", 1)))
         off_rounds = int(schedule.get("off_rounds", 1))
-        overrides.append(f"+model_attack.schedule.period={on_rounds + off_rounds}")
-        overrides.append(f"+model_attack.schedule.active_rounds={on_rounds}")
+        overrides.append(f"++model_attack.schedule.period={on_rounds + off_rounds}")
+        overrides.append(f"++model_attack.schedule.active_rounds={on_rounds}")
     elif schedule_type == "gradual":
         if "ramp_rounds" in schedule:
             overrides.append(
-                f"+model_attack.schedule.ramp_rounds={int(schedule['ramp_rounds'])}"
+                f"++model_attack.schedule.ramp_rounds={int(schedule['ramp_rounds'])}"
             )
         if "gradual_start_strength" in schedule:
             overrides.append(
-                "+model_attack.schedule.gradual_start_strength="
+                "++model_attack.schedule.gradual_start_strength="
                 f"{float(schedule['gradual_start_strength'])}"
             )
         if "gradual_end_strength" in schedule:
             overrides.append(
-                "+model_attack.schedule.gradual_end_strength="
+                "++model_attack.schedule.gradual_end_strength="
                 f"{float(schedule['gradual_end_strength'])}"
             )
 
