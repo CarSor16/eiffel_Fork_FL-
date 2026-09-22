@@ -1,5 +1,6 @@
 # eiffel
 Evaluation framework for FL-based intrusion detection using Flower.
+This fork wants to use the base framework implemented on flower to extend it for new attacks
 
 ## Usage
 
