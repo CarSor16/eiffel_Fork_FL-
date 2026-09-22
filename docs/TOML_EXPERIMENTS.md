@@ -62,6 +62,69 @@ malicious_fraction = 0.2
 
 becomes 8 benign clients and 2 malicious clients.
 
+## Synthetic 50k benchmark
+
+The previous attack lab's synthetic stress benchmark is available again through:
+
+```toml
+[dataset]
+name = "synthetic_stress"
+samples_per_client = 5000
+central_test_size = 12000
+num_features = 32
+num_classes = 6
+```
+
+With 10 clients this creates exactly **50,000 federated training samples** (5,000 per
+client) plus a separate **12,000-sample common test set**.
+
+The generator preserves the main characteristics of the previous stress environment:
+imbalanced traffic families, a rare attack family, overlapping and multimodal classes,
+informative/redundant/noise features, hard examples, client-specific covariate shift,
+small training-label noise, outliers, and a shifted common test distribution.
+
+Eiffel's supervised models are binary, so the six traffic families are retained in the
+`Attack` metadata while the training target is mapped to:
+
+```text
+Benign -> 0
+any attack family -> 1
+```
+
+This keeps per-family recall/miss-rate analysis while remaining compatible with Eiffel's
+binary NIDS pipeline.
+
+For this dataset the generator itself creates the exact client shards. A
+`PreassignedPartitioner` therefore preserves the 5,000 samples/client instead of
+repartitioning them after generation. The TOML can still use:
+
+```toml
+[partition]
+type = "dirichlet"
+dirichlet_alpha = 0.5
+```
+
+because the TOML runner passes that alpha to the synthetic generator before selecting the
+preassigned Eiffel partitioner.
+
+Ready-to-run profiles include:
+
+```text
+synthetic_50k_quick_clean.toml
+synthetic_50k_quick_sign_flip.toml
+synthetic_50k_clean.toml
+synthetic_50k_label_flip.toml
+synthetic_50k_sign_flip.toml
+synthetic_50k_model_scaling.toml
+synthetic_50k_gaussian_noise.toml
+synthetic_50k_lie.toml
+synthetic_50k_gradient_mimicry.toml
+synthetic_50k_colluding_sign_flip.toml
+```
+
+The two `quick` profiles keep the full 50k training samples but use only five FL rounds
+for environment validation.
+
 ## Dataset aliases
 
 Current aliases:
