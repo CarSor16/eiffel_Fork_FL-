@@ -630,48 +630,38 @@ under a common Flower/Hydra experimental framework.
 
 ---
 
-## Example model-poisoning runs
+## Example experiment runs
 
-Continuous Sign Flip:
+For framework validation without downloading a dataset:
 
-```bash
-python -m eiffel \
-num_clients=9 \
-num_attackers=1 \
-poisoning/profile=clean \
-model_attack=sign_flip
+```powershell
+.\run.cmd synthetic_50k_quick_clean
+.\run.cmd synthetic_50k_quick_sign_flip
 ```
 
-Gradient Mimicry:
+For the full synthetic attack profiles:
 
-```bash
-python -m eiffel \
-num_clients=9 \
-num_attackers=1 \
-poisoning/profile=clean \
-model_attack=gradient_mimicry
+```powershell
+.\run.cmd synthetic_50k_gradient_mimicry
+.\run.cmd synthetic_50k_colluding_sign_flip
 ```
 
-Two coordinated malicious clients:
+Real-data profiles use the same launcher, for example:
 
-```bash
-python -m eiffel \
-num_clients=8 \
-num_attackers=2 \
-poisoning/profile=clean \
-model_attack=colluding_sign_flip
+```powershell
+.\run.cmd realistic_sign_flip
+.\run.cmd realistic_gradient_mimicry
 ```
 
-FT-Transformer with Sign Flip:
+Real-data commands require the corresponding NF-V2 file under `data/nfv2/sampled/`.
 
-```bash
-python -m eiffel \
-model=ft_transformer \
-num_clients=9 \
-num_attackers=1 \
-poisoning/profile=clean \
-model_attack=sign_flip
+To try another model without editing the TOML:
+
+```powershell
+.\run.cmd synthetic_50k_quick_sign_flip model=cnn1d
 ```
+
+For thesis runs, prefer saving the model choice directly in a dedicated TOML profile.
 
 ---
 
@@ -704,7 +694,7 @@ To validate the profile and inspect the generated Eiffel/Hydra command without s
 python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml --dry-run
 ```
 
-The compatibility layer supports the current attack set, temporal schedules, model choice, Dirichlet non-IID partitioning, HDF5 storage, and NF-V2 dataset aliases. The old synthetic-stress profiles have been adapted to Eiffel-compatible NF-V2 experiments rather than silently pretending the old synthetic results are reproducible on a different runtime.
+The compatibility layer supports the current attack set, temporal schedules, model choice, Dirichlet non-IID partitioning, HDF5 storage, the restored 50k synthetic benchmark, and NF-V2 dataset aliases. Synthetic and real-data profiles are kept separate so framework validation is not confused with real NIDS evaluation.
 
 See [docs/TOML_EXPERIMENTS.md](docs/TOML_EXPERIMENTS.md) for the complete mapping and supported fields.
 
