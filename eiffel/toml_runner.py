@@ -42,6 +42,8 @@ DATASETS = {
     "ton-iot": "nfv2/sampled/toniot",
     "ton_iot": "nfv2/sampled/toniot",
     "botiot": "nfv2/sampled/botiot",
+    "synthetic_stress": "synthetic/stress",
+    "synthetic_50k": "synthetic/stress",
 }
 
 MODELS = {
@@ -147,6 +149,8 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
     storage = _table(profile, "storage")
 
     total_clients = int(experiment.get("num_clients", 10))
+    dataset_name = str(dataset.get("name", "cicids")).lower()
+    synthetic_stress = dataset_name in {"synthetic_stress", "synthetic_50k"}
     if total_clients < 1:
         raise TomlExperimentError("experiment.num_clients must be >= 1")
 
@@ -165,6 +169,39 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         f"num_attackers={attackers}",
         f"+datasets={_dataset_group(dataset)}",
     ]
+
+    if synthetic_stress:
+        overrides.append(
+            f"datasets.synthetic_stress.num_clients={total_clients}"
+        )
+        dataset_keys = {
+            "samples_per_client": "samples_per_client",
+            "central_test_size": "central_test_size",
+            "num_features": "num_features",
+            "num_classes": "num_classes",
+            "rare_class_id": "rare_class_id",
+            "rare_class_probability": "rare_class_probability",
+            "rare_specialist_client": "rare_specialist_client",
+            "rare_specialist_strength": "rare_specialist_strength",
+            "feature_noise": "feature_noise",
+            "stress_latent_dim": "latent_dim",
+            "stress_informative_features": "informative_features",
+            "stress_redundant_features": "redundant_features",
+            "stress_class_separation": "class_separation",
+            "stress_latent_noise": "latent_noise",
+            "stress_secondary_mode_probability": "secondary_mode_probability",
+            "stress_hard_example_fraction": "hard_example_fraction",
+            "stress_train_label_noise": "train_label_noise",
+            "stress_client_shift_std": "client_shift_std",
+            "stress_central_shift_std": "central_shift_std",
+            "stress_outlier_fraction": "outlier_fraction",
+        }
+        for toml_key, hydra_key in dataset_keys.items():
+            if toml_key in dataset:
+                overrides.append(
+                    "datasets.synthetic_stress."
+                    f"{hydra_key}={_quote_hydra(dataset[toml_key])}"
+                )
 
     # Training.
     if "local_epochs" in training:
@@ -189,20 +226,38 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
 
     # Partitioning.
     partition_type = str(partition.get("type", "iid")).lower()
-    if partition_type in {"iid", "dumb", "niid_class", "dirichlet"}:
-        overrides.append(f"partitioner={partition_type}")
-    else:
-        raise TomlExperimentError(
-            "Unsupported partition.type. Use iid, dumb, niid_class or dirichlet."
-        )
-    if partition_type == "dirichlet":
-        overrides.append(
-            f"partitioner.alpha={float(partition.get('dirichlet_alpha', 0.5))}"
-        )
-        if "min_partition_size" in partition:
-            overrides.append(
-                f"partitioner.min_partition_size={int(partition['min_partition_size'])}"
+    if synthetic_stress:
+        if partition_type not in {"iid", "dirichlet"}:
+            raise TomlExperimentError(
+                "synthetic_stress supports partition.type iid or dirichlet."
             )
+        # The synthetic generator creates the client shards itself, including
+        # Dirichlet label skew and client-specific covariate shift. Eiffel must then
+        # preserve those exact 5k/client shards.
+        overrides.append("partitioner=preassigned")
+        overrides.append(
+            "datasets.synthetic_stress.partition_mode="
+            f"{partition_type}"
+        )
+        overrides.append(
+            "datasets.synthetic_stress.dirichlet_alpha="
+            f"{float(partition.get('dirichlet_alpha', 0.5))}"
+        )
+    else:
+        if partition_type in {"iid", "dumb", "niid_class", "dirichlet"}:
+            overrides.append(f"partitioner={partition_type}")
+        else:
+            raise TomlExperimentError(
+                "Unsupported partition.type. Use iid, dumb, niid_class or dirichlet."
+            )
+        if partition_type == "dirichlet":
+            overrides.append(
+                f"partitioner.alpha={float(partition.get('dirichlet_alpha', 0.5))}"
+            )
+            if "min_partition_size" in partition:
+                overrides.append(
+                    f"partitioner.min_partition_size={int(partition['min_partition_size'])}"
+                )
 
     # Aggregation. The instrumented strategy is required to capture submitted
     # updates and to inject model attacks before FedAvg aggregation.
