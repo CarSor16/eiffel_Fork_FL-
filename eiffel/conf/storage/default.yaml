@@ -1,0 +1,8 @@
+# @package storage
+enabled: true
+path: round_state.h5
+compression: gzip
+compression_level: 4
+flush_each_round: true
+capture_inference: true
+probe_size: 256
