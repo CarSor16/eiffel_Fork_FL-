@@ -473,6 +473,44 @@ The compatibility layer supports the current attack set, temporal schedules, mod
 
 See [docs/TOML_EXPERIMENTS.md](docs/TOML_EXPERIMENTS.md) for the complete mapping and supported fields.
 
+### Synthetic 50k benchmark
+
+The controlled synthetic stress benchmark from the previous Flower attack lab is also
+available in this Eiffel build.
+
+The default setup creates:
+
+```text
+10 clients x 5,000 training samples = 50,000 federated samples
+12,000 separate common test samples
+32 features
+6 traffic families
+Dirichlet non-IID label skew (alpha = 0.5)
+client-specific covariate shift
+class overlap, rare attacks, label noise and outliers
+```
+
+The six traffic families remain available as metadata, while the learning target is
+binary (Benign vs Attack) to stay compatible with Eiffel's NIDS models.
+
+For a short validation run using the complete 50k training set:
+
+```powershell
+.\run-toml.ps1 experiments\toml\synthetic_50k_quick_clean.toml
+```
+
+and the corresponding Sign Flip test is:
+
+```powershell
+.\run-toml.ps1 experiments\toml\synthetic_50k_quick_sign_flip.toml
+```
+
+A complete attack suite can be started with:
+
+```powershell
+.\run-synthetic-50k-suite.ps1
+```
+
 ## Configuration
 
 Eiffel uses Hydra.
