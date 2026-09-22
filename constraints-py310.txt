@@ -19,3 +19,5 @@ schema==0.7.5
 tomli==2.0.1
 
 pyarrow==16.1.0
+
+setuptools==80.9.0
