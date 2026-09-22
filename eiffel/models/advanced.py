@@ -154,3 +154,46 @@ def mk_ft_transformer(
         optimizer,
         learning_rate,
     )
+
+
+def mk_stress_mlp(
+    n_features: int,
+    loss_fn: Optional[Loss] = None,
+    optimizer: Optional[Optimizer] = None,
+    learning_rate: float = 0.001,
+    hidden1: int = 64,
+    hidden2: int = 32,
+    weight_decay: float = 0.0001,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+) -> keras.Model:
+    """MLP matching the previous 50k synthetic-stress laboratory baseline."""
+    regularizer = keras.regularizers.l2(weight_decay) if weight_decay > 0 else None
+    model = keras.Sequential(
+        [
+            keras.layers.Input(shape=(n_features,)),
+            keras.layers.Dense(
+                int(hidden1),
+                activation="relu",
+                kernel_regularizer=regularizer,
+            ),
+            keras.layers.Dense(
+                int(hidden2),
+                activation="relu",
+                kernel_regularizer=regularizer,
+            ),
+            keras.layers.Dense(1, activation="sigmoid"),
+        ],
+        name="eiffel_synthetic_stress_mlp",
+    )
+    model.compile(
+        optimizer=optimizer
+        or Adam(
+            learning_rate=learning_rate,
+            beta_1=beta1,
+            beta_2=beta2,
+        ),
+        loss=loss_fn or BinaryCrossentropy(),
+        metrics=["accuracy"],
+    )
+    return model
