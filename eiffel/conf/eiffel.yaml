@@ -48,6 +48,7 @@ experiment:
   strategy: ${strategy}
   model_fn: ${model}
   partitioner: ${partitioner}
+  storage: ${storage}
 
   pools: "${pools}"
 
@@ -62,7 +63,9 @@ defaults:
 
   #- datasets: ???
 
-  - strategy: fedavg
+  - storage: default
+  - model_attack: none
+  - strategy: instrumented_fedavg
   - model: popoola
   - partitioner: dumb
 
