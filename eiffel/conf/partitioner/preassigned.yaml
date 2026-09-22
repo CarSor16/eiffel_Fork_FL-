@@ -1,0 +1,6 @@
+_target_: eiffel.datasets.partitioners.PreassignedPartitioner
+_partial_: true
+
+column: "ClientHint"
+df_key: "m"
+seed: ${seed}
