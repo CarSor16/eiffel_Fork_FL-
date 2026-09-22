@@ -2,6 +2,12 @@
 Evaluation framework for FL-based intrusion detection using Flower.
 This fork wants to use the base framework implemented on flower to extend it for new attacks
 
+## FL security extensions
+
+This fork adds compact round-by-round HDF5 storage, raw submitted-update capture, update auditing, procedural model-poisoning attacks, temporal schedules, and additional TensorFlow/Keras NIDS models (P4P-style MLP, 1D-CNN, FT-Transformer).
+
+See [docs/FL_SECURITY_EXTENSIONS.md](docs/FL_SECURITY_EXTENSIONS.md) for configuration and examples.
+
 ## Usage
 
 ### As a tool
