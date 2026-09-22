@@ -12,6 +12,240 @@ The original Eiffel design is intentionally preserved where possible: Hydra rema
 
 ---
 
+## Quick start: complete Windows setup
+
+The supported local workflow uses **Python 3.10** and does **not require Poetry**.
+
+From the repository root, the shortest setup is:
+
+```powershell
+.\setup.cmd
+```
+
+`setup.cmd` checks Python 3.10, creates `.venv`, installs Eiffel plus its runtime dependencies, and verifies imports for TensorFlow, Flower, Hydra, HDF5, and Eiffel.
+
+Then validate the environment and TOML configuration layer:
+
+```powershell
+.\run.cmd -Doctor
+```
+
+The recommended first end-to-end run is:
+
+```powershell
+.\run.cmd synthetic_50k_quick_clean
+```
+
+followed by:
+
+```powershell
+.\run.cmd synthetic_50k_quick_sign_flip
+```
+
+Both quick profiles use the complete 50,000-sample synthetic federated training set but only 5 communication rounds.
+
+### Prerequisites
+
+Required:
+
+```text
+Windows 10/11
+Git
+Python 3.10.x
+Internet access for the first dependency installation
+```
+
+Check installed Python versions with:
+
+```powershell
+py -0p
+```
+
+If Python 3.10 is missing:
+
+```powershell
+winget install -e --id Python.Python.3.10
+```
+
+Close and reopen the terminal after installation, then run `py -0p` again.
+
+### Environment commands
+
+Normal one-time setup:
+
+```powershell
+.\setup.cmd
+```
+
+Rebuild the environment from scratch:
+
+```powershell
+.\setup.cmd -Force
+```
+
+Install the optional test dependency as well:
+
+```powershell
+.\setup.cmd -Dev
+```
+
+The project interpreter is:
+
+```text
+.venv\Scripts\python.exe
+```
+
+For IntelliJ/PyCharm, select that interpreter for the project.
+
+Manual equivalent:
+
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+.\.venv\Scripts\python.exe -m pip install -e .
+```
+
+Activation is optional. If desired:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+If PowerShell blocks activation:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+The `.cmd` launchers already invoke PowerShell with a process-local execution-policy bypass, so using `setup.cmd` and `run.cmd` normally avoids this problem.
+
+### Unified experiment launcher
+
+The simplest command is:
+
+```powershell
+.\run.cmd
+```
+
+With no arguments it displays an interactive menu of all TOML experiment profiles.
+
+Run a named profile:
+
+```powershell
+.\run.cmd synthetic_50k_quick_clean
+```
+
+The `.toml` extension is optional.
+
+List available profiles:
+
+```powershell
+.\run.cmd -List
+```
+
+Validate a profile without starting Flower:
+
+```powershell
+.\run.cmd synthetic_50k_quick_sign_flip -DryRun
+```
+
+Run the environment/configuration doctor:
+
+```powershell
+.\run.cmd -Doctor
+```
+
+Run the complete synthetic 50k attack suite:
+
+```powershell
+.\run.cmd -Suite synthetic50k
+```
+
+Validate the whole suite without training:
+
+```powershell
+.\run.cmd -Suite synthetic50k -DryRun
+```
+
+Extra Hydra overrides can still be appended for quick exploratory runs, for example:
+
+```powershell
+.\run.cmd synthetic_50k_quick_sign_flip storage.capture_inference=false
+```
+
+For experiments intended to be reported in the thesis, prefer editing or creating a TOML file so the complete configuration is explicit and reproducible.
+
+### Real-dataset files
+
+The synthetic profiles require no external dataset. Real NF-V2 profiles expect sampled files under:
+
+```text
+data/
+└── nfv2/
+    └── sampled/
+        ├── cicids.csv.gz
+        ├── nb15.csv.gz
+        ├── toniot.csv.gz
+        └── botiot.csv.gz
+```
+
+The dataset files themselves are not bundled in this repository.
+
+### Where results are saved
+
+Hydra creates one run directory under:
+
+```text
+outputs/YYYY-MM-DD/HH-MM-SS/
+```
+
+Typical run artifacts include `stats.json`, Hydra's `.hydra/` configuration files, normal Eiffel metrics, and—when instrumented storage is enabled—`round_state.h5`.
+
+Because the default HDF5 path is relative, `round_state.h5` is written inside the corresponding Hydra run directory.
+
+### Troubleshooting
+
+If `py -3.10` reports that no suitable runtime exists, install Python 3.10 with the `winget` command above and reopen the terminal.
+
+If `.venv\Scripts\Activate.ps1` does not exist, the virtual environment has not been created; run:
+
+```powershell
+.\setup.cmd
+```
+
+If the environment becomes inconsistent, rebuild it:
+
+```powershell
+.\setup.cmd -Force
+```
+
+If a real dataset run reports `Dataset not found`, verify the corresponding `.csv.gz` file under `data/nfv2/sampled/`. Synthetic runs do not use those files.
+
+If you are unsure whether a TOML is valid, use `-DryRun`. If you are unsure whether the environment is healthy, use `-Doctor`.
+
+### Tests
+
+Install test support:
+
+```powershell
+.\setup.cmd -Dev
+```
+
+Then run:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+```
+
+Focused tests for the new experiment layer:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest eiffel\core\tests\toml_runner_test.py
+.\.venv\Scripts\python.exe -m pytest eiffel\core\tests\synthetic_stress_test.py
+```
+
+---
 ## Research direction
 
 The project currently follows this progression:
@@ -451,15 +685,16 @@ Runnable profiles are stored in:
 experiments/toml/
 ```
 
-For example:
+For normal use, prefer the unified launcher:
+
+```powershell
+.\run.cmd smoke_sign_flip
+```
+
+The lower-level compatibility entrypoints are still available:
 
 ```powershell
 .\run-toml.ps1 experiments\toml\smoke_sign_flip.toml
-```
-
-or:
-
-```powershell
 python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml
 ```
 
