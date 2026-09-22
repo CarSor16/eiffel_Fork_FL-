@@ -344,3 +344,54 @@ class DirichletPartitioner(Partitioner):
             part.y = dataset.y.iloc[idx].copy()
             part.m = dataset.m.iloc[idx].copy()
             self.partitions.append(part)
+
+
+class PreassignedPartitioner(Partitioner):
+    """Partition a dataset using a metadata column containing client IDs.
+
+    This is primarily used by the synthetic stress generator, which creates exactly
+    samples_per_client samples for each synthetic client and stores the intended
+    client index in m[column].
+    """
+
+    def __init__(
+        self,
+        *args,
+        column: str = "ClientHint",
+        df_key: str = "m",
+        **kwargs,
+    ) -> None:
+        self.column = column
+        self.df_key = df_key
+        super().__init__(*args, **kwargs)
+
+    def _partition(self, dataset: Dataset) -> None:
+        if not hasattr(dataset, self.df_key):
+            raise KeyError(
+                f"Dataset does not contain a DataFrame with key {self.df_key}"
+            )
+        metadata = getattr(dataset, self.df_key)
+        if self.column not in metadata.columns:
+            raise KeyError(
+                f"Dataset does not contain a column named {self.column}"
+            )
+
+        client_ids = sorted(
+            int(v)
+            for v in metadata[self.column].unique()
+            if int(v) >= 0
+        )
+        if len(client_ids) != self.n_partitions:
+            raise ValueError(
+                "PreassignedPartitioner expected "
+                f"{self.n_partitions} client IDs, found {len(client_ids)}."
+            )
+
+        self.partitions = []
+        for client_id in client_ids:
+            mask = metadata[self.column] == client_id
+            part = dataset.copy()
+            part.X = dataset.X.loc[mask].copy()
+            part.y = dataset.y.loc[mask].copy()
+            part.m = dataset.m.loc[mask].copy()
+            self.partitions.append(part)
