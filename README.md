@@ -241,6 +241,8 @@ If `.venv\Scripts\Activate.ps1` does not exist, the virtual environment has not 
 .\setup.cmd
 ```
 
+If installation fails with a Ray / PyArrow conflict, make sure you are on the latest branch version. The supported setup intentionally installs plain `ray==2.6.3`, **without** Ray's `data` extra: that extra requires an old PyArrow range incompatible with the dataset stack. The project pins `pyarrow==16.1.0`, which has a CPython 3.10 Windows wheel and is compatible with the NF-V2 pandas loader.
+
 If installation fails with `ResolutionImpossible` and mentions Flower / cryptography / protobuf, first pull the latest branch and rebuild the virtual environment:
 
 ```powershell
