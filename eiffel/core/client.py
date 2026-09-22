@@ -23,6 +23,7 @@ from eiffel.datasets.poisoning import PoisonIns, PoisonTask
 from eiffel.utils import set_seed
 from eiffel.utils.logging import VerbLevel
 from eiffel.utils.typing import EiffelCID, MetricsDict, NDArray
+from eiffel.storage import encode_array
 
 from .pool import Pool
 
@@ -154,6 +155,27 @@ class EiffelClient(NumPyClient):
         ret = {
             "_cid": self.cid,
         }
+
+        # Capture a compact, deterministic first inference for round-level analysis.
+        # The payload is transiently base64 encoded because Flower metrics accept
+        # scalar values; the instrumented strategy decodes it and stores float16 HDF5.
+        if bool(config.get("capture_inference", False)):
+            test_set: Dataset = ray.get(self.data_holder.get.remote("test"))
+            probe_size = min(int(config.get("probe_size", 256)), len(test_set))
+            if probe_size > 0:
+                probe_x = test_set.X.iloc[:probe_size].to_numpy()
+                probe_y = test_set.y.iloc[:probe_size].to_numpy()
+                inference = self.model.predict(
+                    probe_x,
+                    batch_size=int(config["batch_size"]),
+                    verbose=0,
+                )
+                ret["_eiffel_inference"] = encode_array(
+                    np.asarray(inference), dtype="float16"
+                )
+                ret["_eiffel_probe_labels"] = encode_array(
+                    np.asarray(probe_y), dtype="int16"
+                )
 
         if self.eval_fit:
             test_loss, _, metrics = self.evaluate(self.model.get_weights(), config)
