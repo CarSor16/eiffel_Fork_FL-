@@ -175,10 +175,11 @@ def read_compact_run(run: RunSpec) -> tuple[list[dict[str, object]], list[dict[s
 
             update_row = dict(base)
             for metric in AUDIT_METRICS:
-                update_row[f"benign_{metric}_mean"] = _mean(
+                suffix = "l2_mean" if metric == "l2" else metric
+                update_row[f"benign_{suffix}"] = _mean(
                     _audit_value(client, metric) for client in benign
                 )
-                update_row[f"malicious_{metric}_mean"] = _mean(
+                update_row[f"malicious_{suffix}"] = _mean(
                     _audit_value(client, metric) for client in malicious
                 )
 
