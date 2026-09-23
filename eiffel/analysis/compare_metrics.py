@@ -385,6 +385,60 @@ def _delta_vs_clean(
     return delta_rows
 
 
+def _plot_family_round_recall(
+    rows: Sequence[dict[str, object]], output_dir: Path
+) -> None:
+    recall_rows = [row for row in rows if row["metric"] == "recall"]
+    families = sorted({str(row["family"]) for row in recall_rows})
+    for family in families:
+        grouped: dict[tuple[str, int], list[float]] = defaultdict(list)
+        for row in recall_rows:
+            if str(row["family"]) != family:
+                continue
+            grouped[(str(row["attack"]), int(row["round"]))].append(
+                float(row["value"])
+            )
+        attacks = sorted({attack for attack, _ in grouped})
+        if not attacks:
+            continue
+        fig, ax = plt.subplots(figsize=(9.5, 5.5))
+        for attack in attacks:
+            rounds = sorted(r for label, r in grouped if label == attack)
+            means = [
+                float(np.mean(grouped[(attack, round_number)]))
+                for round_number in rounds
+            ]
+            stds = [
+                float(np.std(grouped[(attack, round_number)]))
+                for round_number in rounds
+            ]
+            line = ax.plot(
+                rounds, means, marker="o", linewidth=1.8, label=attack
+            )[0]
+            if any(value > 0 for value in stds):
+                ax.fill_between(
+                    rounds,
+                    np.asarray(means) - np.asarray(stds),
+                    np.asarray(means) + np.asarray(stds),
+                    alpha=0.15,
+                    color=line.get_color(),
+                )
+        ax.set_xlabel("Communication round")
+        ax.set_ylabel("Recall")
+        ax.set_title(f"{family} recall by round and attack")
+        ax.grid(True, alpha=0.25)
+        ax.legend(loc="best")
+        fig.tight_layout()
+        safe_family = "".join(
+            char if char.isalnum() else "_" for char in family.lower()
+        ).strip("_")
+        fig.savefig(
+            output_dir / f"round_family_recall_{safe_family}.png",
+            dpi=180,
+        )
+        plt.close(fig)
+
+
 def _plot_final_family_recall(
     rows: Sequence[dict[str, object]], output_dir: Path
 ) -> None:
@@ -554,6 +608,7 @@ def analyse(
             family_rows,
             ("attack", "run", "round", "family", "metric", "value"),
         )
+        _plot_family_round_recall(family_rows, output_dir)
         _plot_final_family_recall(family_rows, output_dir)
         family_deltas = _family_delta_vs_clean(family_rows, output_dir)
         if family_deltas:
