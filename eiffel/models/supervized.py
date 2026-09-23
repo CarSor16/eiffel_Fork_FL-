@@ -3,7 +3,7 @@
 from typing import Optional
 
 import keras
-from keras.losses import BinaryCrossentropy, Loss
+from keras.losses import BinaryCrossentropy, Loss, SparseCategoricalCrossentropy
 from keras.optimizers import Adam, Optimizer
 
 
@@ -12,6 +12,8 @@ def mk_popoola_mlp(
     loss_fn: Optional[Loss] = None,
     optimizer: Optional[Optimizer] = None,
     learning_rate=0.0001,
+    task: str = "binary",
+    num_classes: int = 2,
 ) -> keras.Model:
     """Create a MLP model.
 
@@ -46,13 +48,27 @@ def mk_popoola_mlp(
         [
             keras.layers.Dense(128, activation="relu", input_shape=(n_features,)),
             keras.layers.Dense(128, activation="relu"),
-            keras.layers.Dense(1, activation="sigmoid"),
+            keras.layers.Dense(
+                1 if str(task).lower() == "binary" else int(num_classes),
+                activation="sigmoid" if str(task).lower() == "binary" else "softmax",
+            ),
         ]
     )
 
+    task = str(task).lower()
+    if task not in {"binary", "multiclass"}:
+        raise ValueError("task must be 'binary' or 'multiclass'")
+    if task == "multiclass" and int(num_classes) < 2:
+        raise ValueError("num_classes must be >= 2 for multiclass")
+
     model.compile(
         optimizer=optimizer or Adam(learning_rate=learning_rate),
-        loss=loss_fn or BinaryCrossentropy(),
+        loss=loss_fn
+        or (
+            BinaryCrossentropy()
+            if task == "binary"
+            else SparseCategoricalCrossentropy()
+        ),
         metrics=["accuracy"],
     )
 
