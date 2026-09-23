@@ -92,6 +92,7 @@ def test_analysis_writes_round_final_delta_and_family_outputs(tmp_path):
         "final_per_family_recall.png",
         "per_family_recall_delta_vs_clean.csv",
         "per_family_recall_delta_vs_clean.png",
+        "round_family_recall_botnet.png",
     }
     assert expected.issubset({path.name for path in output.iterdir()})
 
