@@ -31,6 +31,7 @@ def test_synthetic_client_can_fit_and_evaluate_one_round():
         ray.shutdown()
     ray.init(
         num_cpus=1,
+        num_gpus=0,
         local_mode=True,
         include_dashboard=False,
         ignore_reinit_error=True,
