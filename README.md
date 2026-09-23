@@ -1044,43 +1044,74 @@ The lower-level equivalent is:
 
     .\.venv\Scripts\python.exe -m eiffel.analysis.validate_round_state "outputs\YYYY-MM-DD\HH-MM-SS\round_state.h5"
 
-### Compare metrics across rounds and attacks
+### Fresh runs and compact round analysis
 
-The legacy Hydra plot callback now reads `fit.json` instead of the obsolete
-`metrics.json`, so completed experiments no longer print the misleading
-"metrics.json not found" message. The comparison analyzer prefers metrics stored
-directly in `round_state.h5`; for older runs created before HDF5 metric persistence,
-it automatically falls back to the sibling `distributed.json` and then `fit.json`.
-Runs that contain neither source are skipped and must be rerun before performance
-metrics can be compared.
+For thesis work, the default analysis is intentionally compact and run-centric.
+Each fresh run produces only two plots:
 
-To recursively analyse all Eiffel runs below outputs/:
+- `performance_by_round.png`: Accuracy, Macro-F1, macro attack recall and minimum
+  attack-family recall across communication rounds.
+- `updates_by_round.png`: mean submitted-update L2 norm for benign and malicious
+  clients across communication rounds.
+
+Both plots include the malicious-client context in the title. Rounds in which a
+model-poisoning attack is active are shaded using the recorded attack multiplier.
+
+The corresponding CSV files retain the richer numeric detail:
+
+- `round_performance.csv`: round, total clients, malicious clients, active malicious
+  clients, malicious fraction, attack multiplier and the main NIDS scores.
+- `round_updates.csv`: benign/malicious update L2, cosine-to-mean,
+  distance-to-mean, sign agreement, malicious-to-benign L2 ratio and the magnitude
+  of the malicious attack transformation when a pre-attack update is available.
+
+To delete only generated runs and analysis products while keeping code, TOML profiles
+and datasets untouched:
+
+    .\run.cmd -ResetResults
+
+To start a completely fresh quick validation cycle, delete old generated results,
+run a clean synthetic baseline, run synthetic Sign Flip and immediately generate the
+new compact plots:
+
+    .\run.cmd -FreshQuick
+
+The command removes only:
+
+    outputs/
+    analysis-results/
+
+The normal compact analyzer can be run at any time with:
 
     .\run.cmd -Analyze
 
-Custom input/output roots can be selected with:
+Its output is organised per run:
+
+    analysis-results/
+        runs_index.csv
+        clean__<date>_<time>/
+            round_performance.csv
+            round_updates.csv
+            performance_by_round.png
+            updates_by_round.png
+        sign_flip__<date>_<time>/
+            round_performance.csv
+            round_updates.csv
+            performance_by_round.png
+            updates_by_round.png
+
+This layout is intended to answer the primary within-run question: how model quality
+and submitted updates evolve from round to round for one attack configuration and one
+malicious-client fraction.
+
+The previous cross-run analysis remains available when a detailed comparison across
+attacks, seeds, per-family metrics and clean-baseline deltas is required:
+
+    .\run.cmd -AnalyzeDetailed
+
+Custom input/output roots are supported by both analysis modes:
 
     .\run.cmd -Analyze -RunsRoot "outputs" -AnalysisOutput "analysis-results"
-
-The analysis reads the metrics already persisted in round_state.h5; training does not
-need to be repeated. It produces CSV tables plus line plots for each metric across
-communication rounds, per-round attack deltas relative to the clean baseline, a grouped
-bar plot comparing final-round metrics across attacks, a final-metric delta plot
-relative to clean, final per-family recall comparisons, and per-family recall deltas
-relative to clean. The per-round delta plots are especially useful for late, gradual
-and on/off attacks because they show when degradation begins and how it evolves.
-
-When several runs have the same inferred attack label, for example different seeds,
-round trends and final attack comparisons aggregate them; final bars include standard
-deviation error bars. For historical or manually organised runs, labels can be supplied
-explicitly:
-
-    .\.venv\Scripts\python.exe -m eiffel.analysis.compare_metrics --run clean="path\to\clean\round_state.h5" --run sign_flip="path\to\sign_flip\round_state.h5" --output-dir "analysis-results"
-
-The default global metrics include accuracy, F1 where available, macro-F1, weighted-F1,
-recall, miss rate, MCC, macro attack-family recall and minimum attack-family recall.
-Per-family precision/recall/F1/miss-rate values are exported separately whenever the run
-contains them.
 
 ### Hydra and TOML
 
