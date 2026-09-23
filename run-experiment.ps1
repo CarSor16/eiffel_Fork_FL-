@@ -7,6 +7,9 @@ param(
     [switch]$Doctor,
     [switch]$Attacks,
     [switch]$Analyze,
+    [switch]$AnalyzeDetailed,
+    [switch]$ResetResults,
+    [switch]$FreshQuick,
     [switch]$Tests,
     [switch]$Smoke,
     [switch]$Version,
@@ -26,7 +29,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProfilesDir = Join-Path $Root "experiments\toml"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
-$LauncherVersion = "2026-09-23-smoke-failfast-1"
+$LauncherVersion = "2026-09-23-compact-analysis-1"
 
 function Get-Profiles {
     if (-not (Test-Path $ProfilesDir)) {
@@ -172,6 +175,47 @@ Require-Environment
 
 Push-Location $Root
 try {
+    function Reset-GeneratedResults {
+        $Targets = @(
+            (Join-Path $Root "outputs"),
+            (Join-Path $Root "analysis-results")
+        )
+        foreach ($Target in $Targets) {
+            if (Test-Path $Target) {
+                Write-Host "Removing generated results: $Target"
+                Remove-Item -Recurse -Force $Target
+            }
+        }
+        Write-Host "Generated run and analysis folders are clean."
+    }
+
+    if ($ResetResults) {
+        Reset-GeneratedResults
+        exit 0
+    }
+
+    if ($FreshQuick) {
+        Reset-GeneratedResults
+        Write-Host ""
+        Write-Host "Starting fresh synthetic quick baseline..."
+        Invoke-Profile (Resolve-Profile "synthetic_50k_quick_clean")
+        Write-Host ""
+        Write-Host "Starting fresh synthetic quick Sign Flip run..."
+        Invoke-Profile (Resolve-Profile "synthetic_50k_quick_sign_flip")
+
+        $ResolvedRunsRoot = Join-Path $Root "outputs"
+        $ResolvedAnalysisOutput = Join-Path $Root "analysis-results"
+        Write-Host ""
+        Write-Host "Generating compact per-run analysis..."
+        & $Python -m eiffel.analysis.compact_round_analysis --runs-root $ResolvedRunsRoot --output-dir $ResolvedAnalysisOutput
+        if ($LASTEXITCODE -ne 0) {
+            throw "Compact metric analysis failed."
+        }
+        Write-Host ""
+        Write-Host "Fresh quick workflow completed."
+        Write-Host "Analysis written to: $ResolvedAnalysisOutput"
+        exit 0
+    }
     if ($Doctor) {
         Write-Host "Eiffel FL Security Lab - doctor"
         Write-Host ""
@@ -214,6 +258,7 @@ try {
             "eiffel\core\tests\multiclass_models_test.py",
             "eiffel\core\tests\round_store_test.py",
             "eiffel\core\tests\compare_metrics_test.py",
+            "eiffel\core\tests\compact_round_analysis_test.py",
             "eiffel\core\tests\plot_callback_test.py",
             "eiffel\core\tests\toml_runner_test.py",
             "eiffel\core\tests\synthetic_stress_test.py",
@@ -234,7 +279,7 @@ try {
         exit 0
     }
 
-    if ($Analyze) {
+    if ($Analyze -or $AnalyzeDetailed) {
         $ResolvedRunsRoot = if ([System.IO.Path]::IsPathRooted($RunsRoot)) {
             $RunsRoot
         } else {
@@ -245,7 +290,14 @@ try {
         } else {
             Join-Path $Root $AnalysisOutput
         }
-        & $Python -m eiffel.analysis.compare_metrics --runs-root $ResolvedRunsRoot --output-dir $ResolvedAnalysisOutput
+
+        if ($AnalyzeDetailed) {
+            Write-Host "Generating detailed cross-run analysis..."
+            & $Python -m eiffel.analysis.compare_metrics --runs-root $ResolvedRunsRoot --output-dir $ResolvedAnalysisOutput
+        } else {
+            Write-Host "Generating compact per-run analysis..."
+            & $Python -m eiffel.analysis.compact_round_analysis --runs-root $ResolvedRunsRoot --output-dir $ResolvedAnalysisOutput
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "Metric analysis failed."
         }
