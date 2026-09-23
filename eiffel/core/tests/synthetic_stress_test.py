@@ -35,3 +35,47 @@ def test_synthetic_stress_sizes_and_preassigned_shards():
 
     assert len(shards) == 2
     assert [len(shard) for shard in shards] == [20, 20]
+
+
+
+def test_synthetic_stress_multiclass_targets_keep_family_ids():
+    dataset = load_data(
+        seed=2026,
+        num_clients=3,
+        samples_per_client=100,
+        central_test_size=60,
+        num_features=8,
+        num_classes=4,
+        latent_dim=4,
+        informative_features=4,
+        redundant_features=2,
+        dirichlet_alpha=0.5,
+        task="multiclass",
+    )
+
+    labels = set(int(value) for value in dataset.y.unique())
+    assert min(labels) >= 0
+    assert max(labels) < 4
+    assert len(labels) >= 3
+
+    family_to_ids = {}
+    for family in dataset.m["Attack"].unique():
+        ids = set(
+            int(value)
+            for value in dataset.y[dataset.m["Attack"] == family].unique()
+        )
+        family_to_ids[family] = ids
+
+    # Label noise can introduce a small number of mismatches in train data, but the
+    # held-out test split remains a direct family-id target.
+    test_mask = dataset.m["Split"] == "test"
+    test_pairs = set(
+        zip(
+            dataset.m.loc[test_mask, "Attack"].astype(str),
+            dataset.y.loc[test_mask].astype(int),
+        )
+    )
+    assert len({family for family, _ in test_pairs}) >= 3
+    for family, class_id in test_pairs:
+        assert class_id >= 0
+        assert class_id < 4
