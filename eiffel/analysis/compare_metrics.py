@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import csv
 import math
-import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +22,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from omegaconf import OmegaConf
 
 DEFAULT_METRICS = (
     "accuracy",
@@ -56,7 +56,7 @@ def _infer_attack_label(h5_path: Path) -> str:
     schedule = "continuous"
     with h5py.File(h5_path, "r") as h5:
         rounds = h5.get("rounds")
-        if rounds and rounds.keys():
+        if rounds is not None:
             names = sorted(rounds.keys())
             if names:
                 mechanism = _decode(
@@ -65,45 +65,27 @@ def _infer_attack_label(h5_path: Path) -> str:
 
     config_path = h5_path.parent / ".hydra" / "config.yaml"
     if config_path.exists():
-        text = config_path.read_text(encoding="utf-8", errors="replace")
-        match = re.search(
-            r"(?ms)^model_attack:\s*\n(?:^[ \t]+.*\n)*?"
-            r"^[ \t]+mechanism:\s*([^\s#]+)",
-            text,
-        )
-        if match:
-            mechanism = match.group(1).strip("'\"")
-        sched = re.search(
-            r"(?ms)^model_attack:\s*\n(?:^[ \t]+.*\n)*?"
-            r"^[ \t]+schedule:\s*\n(?:^[ \t]+.*\n)*?"
-            r"^[ \t]+type:\s*([^\s#]+)",
-            text,
-        )
-        if sched:
-            schedule = sched.group(1).strip("'\"")
-
-        attackers = re.search(r"(?m)^num_attackers:\s*(\d+)", text)
-        profile = re.search(
-            r"(?ms)^attacks:\s*\n(?:^[ \t]+.*\n)*?"
-            r"^[ \t]+profile:\s*([^\s#]+)",
-            text,
-        )
-        ptype = re.search(
-            r"(?ms)^attacks:\s*\n(?:^[ \t]+.*\n)*?"
-            r"^[ \t]+type:\s*([^\s#]+)",
-            text,
-        )
-        n_attackers = int(attackers.group(1)) if attackers else 0
-        profile_value = profile.group(1).strip("'\"") if profile else ""
-        poison_type = ptype.group(1).strip("'\"") if ptype else ""
-        if (
-            mechanism == "none"
-            and n_attackers > 0
-            and profile_value not in {"", "0.0", "clean"}
-        ):
-            mechanism = "label_flip"
-            if poison_type:
-                mechanism += f"_{poison_type}"
+        try:
+            cfg = OmegaConf.load(config_path)
+            attack_cfg = cfg.get("model_attack", {}) or {}
+            mechanism = str(attack_cfg.get("mechanism", mechanism))
+            schedule_cfg = attack_cfg.get("schedule", {}) or {}
+            schedule = str(schedule_cfg.get("type", "continuous"))
+            n_attackers = int(cfg.get("num_attackers", 0))
+            poisoning = cfg.get("attacks", []) or []
+            if mechanism == "none" and n_attackers > 0 and len(poisoning) > 0:
+                first = poisoning[0]
+                profile_value = str(first.get("profile", ""))
+                poison_type = str(first.get("type", ""))
+                if profile_value not in {"", "0", "0.0", "clean"}:
+                    mechanism = "label_flip"
+                    if poison_type:
+                        mechanism += f"_{poison_type}"
+        except Exception:
+            # HDF5 metadata remains sufficient for model attacks. Explicit --run
+            # LABEL=PATH can always be used when a historical Hydra config is absent
+            # or cannot be parsed.
+            pass
 
     label = "clean" if mechanism == "none" else mechanism
     if schedule not in {"", "continuous"} and label != "clean":
@@ -446,6 +428,77 @@ def _plot_final_family_recall(
     plt.close(fig)
 
 
+def _family_delta_vs_clean(
+    rows: Sequence[dict[str, object]], output_dir: Path
+) -> list[dict[str, object]]:
+    grouped: dict[tuple[str, str, str], list[dict[str, object]]] = defaultdict(list)
+    for row in rows:
+        if row["metric"] == "recall":
+            grouped[
+                (str(row["attack"]), str(row["run"]), str(row["family"]))
+            ].append(row)
+
+    finals: dict[tuple[str, str], list[float]] = defaultdict(list)
+    for (attack, _run, family), values in grouped.items():
+        final = max(values, key=lambda item: int(item["round"]))
+        finals[(attack, family)].append(float(final["value"]))
+
+    clean_families = {
+        family: float(np.mean(values))
+        for (attack, family), values in finals.items()
+        if attack == "clean"
+    }
+    attacks = sorted(
+        {attack for attack, _ in finals if attack != "clean"}
+    )
+    delta_rows: list[dict[str, object]] = []
+    for attack in attacks:
+        for family, baseline in sorted(clean_families.items()):
+            values = finals.get((attack, family), [])
+            if values:
+                delta_rows.append(
+                    {
+                        "attack": attack,
+                        "family": family,
+                        "recall_delta_vs_clean": float(np.mean(values))
+                        - baseline,
+                    }
+                )
+
+    if not delta_rows:
+        return []
+
+    families = sorted({str(row["family"]) for row in delta_rows})
+    x = np.arange(len(attacks), dtype=float)
+    width = 0.8 / len(families)
+    fig, ax = plt.subplots(figsize=(max(10.0, len(attacks) * 1.15), 6.0))
+    for idx, family in enumerate(families):
+        values = [
+            next(
+                (
+                    float(row["recall_delta_vs_clean"])
+                    for row in delta_rows
+                    if row["attack"] == attack and row["family"] == family
+                ),
+                math.nan,
+            )
+            for attack in attacks
+        ]
+        offset = (idx - (len(families) - 1) / 2) * width
+        ax.bar(x + offset, values, width=width, label=family)
+    ax.axhline(0.0, linewidth=1.0)
+    ax.set_xticks(x)
+    ax.set_xticklabels(attacks, rotation=25, ha="right")
+    ax.set_ylabel("Recall difference from clean")
+    ax.set_title("Final per-family recall change relative to clean")
+    ax.grid(True, axis="y", alpha=0.25)
+    ax.legend(loc="best", ncol=2)
+    fig.tight_layout()
+    fig.savefig(output_dir / "per_family_recall_delta_vs_clean.png", dpi=180)
+    plt.close(fig)
+    return delta_rows
+
+
 def analyse(
     runs: Iterable[RunSpec],
     output_dir: Path,
@@ -502,6 +555,13 @@ def analyse(
             ("attack", "run", "round", "family", "metric", "value"),
         )
         _plot_final_family_recall(family_rows, output_dir)
+        family_deltas = _family_delta_vs_clean(family_rows, output_dir)
+        if family_deltas:
+            _write_csv(
+                output_dir / "per_family_recall_delta_vs_clean.csv",
+                family_deltas,
+                ("attack", "family", "recall_delta_vs_clean"),
+            )
 
     return 0
 
