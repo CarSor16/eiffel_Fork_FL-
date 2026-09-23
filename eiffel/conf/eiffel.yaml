@@ -72,9 +72,10 @@ defaults:
   - poisoning/profile: loud
   - poisoning/type: untargeted
 
-  # Framework callback: reads fit.json after a completed run and writes plot.png.
-  - callbacks:
-    - plot
+  # Legacy per-run plot callback is intentionally disabled by default.
+  # Thesis plots are generated after the run by:
+  #   python -m eiffel.analysis.compact_round_analysis
+  # The callback group remains available for explicit legacy experiments.
 
   # Use a `config.yaml` file to override user configuration, like the number of clients.
   # Use `setup` to override experiment configuration, like datasets or attack scenarios.
