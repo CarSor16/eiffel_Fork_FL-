@@ -205,3 +205,49 @@ def test_analysis_falls_back_to_eiffel_json_for_legacy_hdf5(tmp_path):
         if row["family"] == "Botnet" and row["metric"] == "recall"
     )
     assert np.isclose(botnet_recall, 0.66)
+
+
+
+def test_analysis_accepts_round_first_and_json_encoded_metrics(tmp_path):
+    run_dir = tmp_path / "legacy_round_first"
+    run_dir.mkdir()
+    h5_path = run_dir / "round_state.h5"
+    weights = [np.array([1.0], dtype=np.float32)]
+    with RoundStore(h5_path) as store:
+        store.save_global(0, weights)
+        store.save_client(
+            1,
+            "benign_0",
+            submitted_update=[np.array([0.1], dtype=np.float32)],
+        )
+        store.save_global(1, [np.array([1.1], dtype=np.float32)])
+        store.mark_round_complete(1)
+
+    fit = {
+        "1": {
+            "benign_0": json.dumps(
+                {
+                    "global": {"accuracy": 0.79, "macro_f1": 0.74},
+                    "Botnet": {"recall": 0.61, "missrate": 0.39},
+                }
+            )
+        }
+    }
+    (run_dir / "fit.json").write_text(json.dumps(fit), encoding="utf-8")
+
+    output = tmp_path / "round_first_analysis"
+    rc = analyse(
+        [RunSpec("clean", h5_path)],
+        output,
+        ("accuracy", "macro_f1"),
+        "fit",
+    )
+    assert rc == 0
+
+    with (output / "round_metrics.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 1
+    assert np.isclose(float(rows[0]["accuracy"]), 0.79)
+    assert np.isclose(float(rows[0]["macro_f1"]), 0.74)
