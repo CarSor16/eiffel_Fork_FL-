@@ -191,7 +191,8 @@ try {
             "eiffel\core\tests\compare_metrics_test.py",
             "eiffel\core\tests\plot_callback_test.py",
             "eiffel\core\tests\toml_runner_test.py",
-            "eiffel\core\tests\synthetic_stress_test.py"
+            "eiffel\core\tests\synthetic_stress_test.py",
+            "eiffel\core\tests\synthetic_client_integration_test.py"
         )
         & $Python -m pytest @TestFiles
         if ($LASTEXITCODE -ne 0) {
