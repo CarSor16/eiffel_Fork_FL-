@@ -6,7 +6,7 @@ from typing import Optional
 
 import tensorflow as tf
 from tensorflow import keras
-from keras.losses import BinaryCrossentropy, Loss
+from keras.losses import BinaryCrossentropy, Loss, SparseCategoricalCrossentropy
 from keras.optimizers import Adam, Optimizer
 
 
@@ -15,13 +15,34 @@ def _compile(
     loss_fn: Optional[Loss],
     optimizer: Optional[Optimizer],
     learning_rate: float,
+    *,
+    task: str = "binary",
 ) -> keras.Model:
+    task = str(task).lower()
+    if task not in {"binary", "multiclass"}:
+        raise ValueError("task must be 'binary' or 'multiclass'")
+    default_loss = (
+        BinaryCrossentropy()
+        if task == "binary"
+        else SparseCategoricalCrossentropy()
+    )
     model.compile(
         optimizer=optimizer or Adam(learning_rate=learning_rate),
-        loss=loss_fn or BinaryCrossentropy(),
+        loss=loss_fn or default_loss,
         metrics=["accuracy"],
     )
     return model
+
+
+def _classifier(task: str, num_classes: int) -> keras.layers.Layer:
+    task = str(task).lower()
+    if task == "binary":
+        return keras.layers.Dense(1, activation="sigmoid")
+    if task == "multiclass":
+        if int(num_classes) < 2:
+            raise ValueError("num_classes must be >= 2 for multiclass")
+        return keras.layers.Dense(int(num_classes), activation="softmax")
+    raise ValueError("task must be 'binary' or 'multiclass'")
 
 
 def mk_p4p_mlp(
@@ -30,6 +51,8 @@ def mk_p4p_mlp(
     optimizer: Optional[Optimizer] = None,
     learning_rate: float = 0.001,
     dropout: float = 0.2,
+    task: str = "binary",
+    num_classes: int = 2,
 ) -> keras.Model:
     """MLP 128-64 with dropout, matching the family used in recent FL-NIDS work."""
     model = keras.Sequential(
@@ -39,10 +62,10 @@ def mk_p4p_mlp(
             keras.layers.Dropout(dropout),
             keras.layers.Dense(64, activation="relu"),
             keras.layers.Dropout(dropout),
-            keras.layers.Dense(1, activation="sigmoid"),
+            _classifier(task, num_classes),
         ]
     )
-    return _compile(model, loss_fn, optimizer, learning_rate)
+    return _compile(model, loss_fn, optimizer, learning_rate, task=task)
 
 
 def mk_cnn1d(
@@ -51,6 +74,8 @@ def mk_cnn1d(
     optimizer: Optional[Optimizer] = None,
     learning_rate: float = 0.001,
     dropout: float = 0.2,
+    task: str = "binary",
+    num_classes: int = 2,
 ) -> keras.Model:
     """Lightweight 1D CNN for flow-feature intrusion detection."""
     inputs = keras.Input(shape=(n_features,))
@@ -63,8 +88,14 @@ def mk_cnn1d(
     x = keras.layers.GlobalAveragePooling1D()(x)
     x = keras.layers.Dense(128, activation="relu")(x)
     x = keras.layers.Dropout(dropout)(x)
-    outputs = keras.layers.Dense(1, activation="sigmoid")(x)
-    return _compile(keras.Model(inputs, outputs, name="eiffel_cnn1d"), loss_fn, optimizer, learning_rate)
+    outputs = _classifier(task, num_classes)(x)
+    return _compile(
+        keras.Model(inputs, outputs, name="eiffel_cnn1d"),
+        loss_fn,
+        optimizer,
+        learning_rate,
+        task=task,
+    )
 
 
 class FeatureTokenizer(keras.layers.Layer):
@@ -120,6 +151,8 @@ def mk_ft_transformer(
     n_blocks: int = 2,
     ff_factor: float = 2.0,
     dropout: float = 0.1,
+    task: str = "binary",
+    num_classes: int = 2,
 ) -> keras.Model:
     """Compact FT-Transformer for numeric network-flow features."""
     if d_token % n_heads != 0:
@@ -147,12 +180,13 @@ def mk_ft_transformer(
 
     cls = keras.layers.Lambda(lambda t: t[:, 0, :], name="take_cls")(x)
     cls = keras.layers.LayerNormalization(name="final_ln")(cls)
-    outputs = keras.layers.Dense(1, activation="sigmoid")(cls)
+    outputs = _classifier(task, num_classes)(cls)
     return _compile(
         keras.Model(inputs, outputs, name="eiffel_ft_transformer"),
         loss_fn,
         optimizer,
         learning_rate,
+        task=task,
     )
 
 
@@ -166,6 +200,8 @@ def mk_stress_mlp(
     weight_decay: float = 0.0001,
     beta1: float = 0.9,
     beta2: float = 0.999,
+    task: str = "binary",
+    num_classes: int = 2,
 ) -> keras.Model:
     """MLP matching the previous 50k synthetic-stress laboratory baseline."""
     regularizer = keras.regularizers.l2(weight_decay) if weight_decay > 0 else None
@@ -182,7 +218,7 @@ def mk_stress_mlp(
                 activation="relu",
                 kernel_regularizer=regularizer,
             ),
-            keras.layers.Dense(1, activation="sigmoid"),
+            _classifier(task, num_classes),
         ],
         name="eiffel_synthetic_stress_mlp",
     )
@@ -193,7 +229,12 @@ def mk_stress_mlp(
             beta_1=beta1,
             beta_2=beta2,
         ),
-        loss=loss_fn or BinaryCrossentropy(),
+        loss=loss_fn
+        or (
+            BinaryCrossentropy()
+            if str(task).lower() == "binary"
+            else SparseCategoricalCrossentropy()
+        ),
         metrics=["accuracy"],
     )
     return model
