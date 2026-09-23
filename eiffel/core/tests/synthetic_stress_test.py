@@ -1,6 +1,6 @@
 """Tests for the Eiffel-compatible synthetic stress dataset."""
 
-from eiffel.datasets.synthetic_stress import load_data
+from eiffel.datasets.synthetic_stress import CLASS_NAMES, load_data
 from eiffel.datasets.partitioners import PreassignedPartitioner
 
 
@@ -58,16 +58,8 @@ def test_synthetic_stress_multiclass_targets_keep_family_ids():
     assert max(labels) < 4
     assert len(labels) >= 3
 
-    family_to_ids = {}
-    for family in dataset.m["Attack"].unique():
-        ids = set(
-            int(value)
-            for value in dataset.y[dataset.m["Attack"] == family].unique()
-        )
-        family_to_ids[family] = ids
-
     # Label noise can introduce a small number of mismatches in train data, but the
-    # held-out test split remains a direct family-id target.
+    # held-out test split remains an exact family-name -> family-id target.
     test_mask = dataset.m["Split"] == "test"
     test_pairs = set(
         zip(
@@ -77,5 +69,4 @@ def test_synthetic_stress_multiclass_targets_keep_family_ids():
     )
     assert len({family for family, _ in test_pairs}) >= 3
     for family, class_id in test_pairs:
-        assert class_id >= 0
-        assert class_id < 4
+        assert class_id == CLASS_NAMES.index(family)
