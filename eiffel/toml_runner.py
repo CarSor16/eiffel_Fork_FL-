@@ -139,6 +139,108 @@ def _dataset_group(dataset: Mapping[str, Any]) -> str:
         ) from exc
 
 
+def _schedule_table(attack: Mapping[str, Any]) -> Mapping[str, Any]:
+    schedule = attack.get("schedule", {})
+    if schedule is None:
+        return {}
+    if not isinstance(schedule, Mapping):
+        raise TomlExperimentError("[attack.schedule] must be a TOML table.")
+    return schedule
+
+
+def _validate_schedule(
+    schedule: Mapping[str, Any],
+    *,
+    rounds: int,
+) -> tuple[str, int, int]:
+    schedule_type = str(schedule.get("type", "continuous")).lower()
+    allowed = {"continuous", "late", "window", "on_off", "gradual"}
+    if schedule_type not in allowed:
+        raise TomlExperimentError(
+            f"Unsupported attack schedule '{schedule_type}'. "
+            f"Supported: {', '.join(sorted(allowed))}."
+        )
+
+    default_start = max(1, rounds // 2) if schedule_type == "late" else 1
+    start = int(schedule.get("start_round", default_start))
+    end = int(schedule.get("end_round", rounds) or rounds)
+
+    if start < 1 or start > rounds:
+        raise TomlExperimentError(
+            f"attack.schedule.start_round must be in [1, {rounds}], got {start}."
+        )
+    if end < start or end > rounds:
+        raise TomlExperimentError(
+            f"attack.schedule.end_round must be in [{start}, {rounds}], got {end}."
+        )
+    if schedule_type == "on_off":
+        on_rounds = int(schedule.get("on_rounds", schedule.get("active_rounds", 1)))
+        off_rounds = int(schedule.get("off_rounds", 1))
+        if on_rounds < 1 or off_rounds < 1:
+            raise TomlExperimentError(
+                "on_off schedules require on_rounds >= 1 and off_rounds >= 1."
+            )
+    return schedule_type, start, end
+
+
+def _fmt_fraction(value: float) -> str:
+    return f"{float(value):.8f}".rstrip("0").rstrip(".") or "0"
+
+
+def _label_flip_profile(
+    poison_rate: float,
+    schedule: Mapping[str, Any],
+    *,
+    rounds: int,
+) -> str:
+    """Translate a temporal TOML schedule into Eiffel's stateful poison selector."""
+    if not 0.0 <= poison_rate <= 1.0:
+        raise TomlExperimentError("attack.poison_rate must be in [0, 1].")
+
+    kind, start, end = _validate_schedule(schedule, rounds=rounds)
+    rate = _fmt_fraction(poison_rate)
+
+    if poison_rate == 0.0:
+        return "0.0"
+
+    # Base poisoning is used only when the attack is active from round zero onward.
+    if kind == "continuous" and start == 1 and end == rounds:
+        return rate
+
+    if kind in {"continuous", "late", "window"}:
+        profile = f"0.0+{rate}{{{start}}}"
+        if end < rounds:
+            profile += f"-{rate}{{{end + 1}}}"
+        return profile
+
+    if kind == "on_off":
+        on_rounds = int(schedule.get("on_rounds", schedule.get("active_rounds", 1)))
+        off_rounds = int(schedule.get("off_rounds", 1))
+        profile = "0.0"
+        current = start
+        while current <= end:
+            profile += f"+{rate}{{{current}}}"
+            off_at = current + on_rounds
+            if off_at <= end:
+                profile += f"-{rate}{{{off_at}}}"
+            current += on_rounds + off_rounds
+        if end < rounds:
+            # Ensure no poisoned state leaks beyond the requested schedule window.
+            profile += f"-{rate}{{{end + 1}}}"
+        return profile
+
+    # Gradual label flipping: increase the poisoned fraction evenly during the
+    # requested ramp.  The final fraction remains active after the ramp.
+    ramp_rounds = int(schedule.get("ramp_rounds", end - start + 1))
+    if ramp_rounds < 1:
+        raise TomlExperimentError("gradual schedule ramp_rounds must be >= 1.")
+    ramp_end = min(end, start + ramp_rounds - 1)
+    steps = ramp_end - start + 1
+    increment = poison_rate / steps
+    inc = _fmt_fraction(increment)
+    return f"0.0+{inc}[{start}:{ramp_end}]"
+
+
 def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
     """Translate a TOML profile into Eiffel/Hydra overrides."""
     experiment = _table(profile, "experiment")
@@ -151,10 +253,20 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
     storage = _table(profile, "storage")
 
     total_clients = int(experiment.get("num_clients", 10))
+    rounds = int(experiment.get("rounds", 10))
     dataset_name = str(dataset.get("name", "cicids")).lower()
     synthetic_stress = dataset_name in {"synthetic_stress", "synthetic_50k"}
     if total_clients < 1:
         raise TomlExperimentError("experiment.num_clients must be >= 1")
+    if rounds < 1:
+        raise TomlExperimentError("experiment.rounds must be >= 1")
+    task = str(dataset.get("task", "binary")).lower()
+    if task not in {"binary", "family_aware", "multiclass_aware"}:
+        raise TomlExperimentError(
+            "dataset.task currently supports binary, family_aware, or "
+            "multiclass_aware. The latter two keep binary Benign-vs-Attack training "
+            "while reporting metrics separately for every attack family."
+        )
 
     mechanism = str(attack.get("mechanism", "none")).lower()
     attackers = _malicious_count(total_clients, attack)
@@ -166,7 +278,7 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
 
     overrides = [
         f"seed={int(experiment.get('seed', 1138))}",
-        f"num_rounds={int(experiment.get('rounds', 10))}",
+        f"num_rounds={rounds}",
         f"num_clients={benign}",
         f"num_attackers={attackers}",
         f"+datasets={_dataset_group(dataset)}",
@@ -305,19 +417,27 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         if attackers <= 0:
             raise TomlExperimentError("label_flip requires at least one malicious client.")
         poison_rate = float(attack.get("poison_rate", 1.0))
-        # Eiffel's existing profile selectors already model temporal label poisoning.
-        # For now the compatibility layer uses a direct constant profile.
-        overrides.append(f"attacks.0.profile={poison_rate}")
+        schedule = _schedule_table(attack)
+        profile = _label_flip_profile(poison_rate, schedule, rounds=rounds)
+        overrides.append(f"attacks.0.profile={profile}")
         objective = str(attack.get("objective", "untargeted")).lower()
         target = attack.get("target")
         if objective in {"untargeted", "all"}:
             overrides.append("attacks.0.type=untargeted")
-        else:
+        elif objective == "targeted":
             overrides.append("attacks.0.type=targeted")
-            if target is not None:
-                values = list(target) if isinstance(target, (list, tuple)) else [target]
-                target_value = json.dumps(values, separators=(",", ":"))
-                overrides.append(f"++attacks.0.target={target_value}")
+            if not target:
+                raise TomlExperimentError(
+                    "targeted label_flip requires attack.target with at least one "
+                    "attack-family name."
+                )
+            values = list(target) if isinstance(target, (list, tuple)) else [target]
+            target_value = json.dumps(values, separators=(",", ":"))
+            overrides.append(f"++attacks.0.target={target_value}")
+        else:
+            raise TomlExperimentError(
+                "attack.objective for label_flip must be targeted or untargeted."
+            )
         return overrides
 
     try:
@@ -352,22 +472,14 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
             f"model_attack.mimicry_lambda={float(attack['mimicry_lambda'])}"
         )
 
-    schedule = attack.get("schedule", {})
-    if schedule and not isinstance(schedule, Mapping):
-        raise TomlExperimentError("[attack.schedule] must be a TOML table.")
-    schedule = schedule or {}
-    schedule_type = str(schedule.get("type", "continuous")).lower()
-    if schedule_type not in {"continuous", "late", "window", "on_off", "gradual"}:
-        raise TomlExperimentError(f"Unsupported attack schedule '{schedule_type}'.")
+    schedule = _schedule_table(attack)
+    schedule_type, start_round, end_round = _validate_schedule(
+        schedule, rounds=rounds
+    )
 
     overrides.append(f"model_attack.schedule.type={schedule_type}")
-    if "start_round" in schedule:
-        overrides.append(
-            f"model_attack.schedule.start_round={int(schedule['start_round'])}"
-        )
-    end_round = int(schedule.get("end_round", 0) or 0)
-    if end_round > 0:
-        overrides.append(f"++model_attack.schedule.end_round={end_round}")
+    overrides.append(f"model_attack.schedule.start_round={start_round}")
+    overrides.append(f"++model_attack.schedule.end_round={end_round}")
 
     if schedule_type == "on_off":
         on_rounds = int(schedule.get("on_rounds", schedule.get("active_rounds", 1)))
