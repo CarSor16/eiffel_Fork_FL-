@@ -261,11 +261,16 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
     if rounds < 1:
         raise TomlExperimentError("experiment.rounds must be >= 1")
     task = str(dataset.get("task", "binary")).lower()
-    if task not in {"binary", "family_aware", "multiclass_aware"}:
+    if task == "multiclass_aware":
+        task = "family_aware"
+    if task not in {"binary", "family_aware", "multiclass"}:
         raise TomlExperimentError(
-            "dataset.task currently supports binary, family_aware, or "
-            "multiclass_aware. The latter two keep binary Benign-vs-Attack training "
-            "while reporting metrics separately for every attack family."
+            "dataset.task supports binary, family_aware, or multiclass."
+        )
+    if task == "multiclass" and not synthetic_stress:
+        raise TomlExperimentError(
+            "dataset.task=multiclass is currently supported only by synthetic_stress. "
+            "Real NF-V2 datasets remain on the binary Eiffel baseline."
         )
 
     mechanism = str(attack.get("mechanism", "none")).lower()
@@ -316,6 +321,10 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
                     "datasets.synthetic_stress."
                     f"{hydra_key}={_quote_hydra(dataset[toml_key])}"
                 )
+        overrides.append(
+            "datasets.synthetic_stress.task="
+            + ("multiclass" if task == "multiclass" else "binary")
+        )
 
     # Training.
     if "local_epochs" in training:
@@ -332,6 +341,12 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
             f"Unsupported model '{model_name}'. Supported: {', '.join(MODELS)}"
         ) from exc
     overrides.append(f"model={hydra_model}")
+    if task == "multiclass":
+        num_classes = int(dataset.get("num_classes", 6))
+        if num_classes < 2:
+            raise TomlExperimentError("dataset.num_classes must be >= 2 for multiclass")
+        overrides.append("++model.task=multiclass")
+        overrides.append(f"++model.num_classes={num_classes}")
     if "learning_rate" in training:
         overrides.append(f"++model.learning_rate={float(training['learning_rate'])}")
     for key in (
@@ -413,6 +428,13 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
 
     # Attacks.
     if mechanism == "label_flip":
+        if task == "multiclass":
+            raise TomlExperimentError(
+                "Multiclass label flipping is intentionally disabled until the TOML "
+                "defines an explicit source_class -> destination_class mapping. "
+                "Use family_aware for Eiffel-compatible label flipping, or use a "
+                "model-update attack with task=multiclass."
+            )
         overrides.append("model_attack=none")
         if attackers <= 0:
             raise TomlExperimentError("label_flip requires at least one malicious client.")
