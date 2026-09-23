@@ -186,6 +186,7 @@ try {
         $TestFiles = @(
             "eiffel\core\tests\model_attacks_test.py",
             "eiffel\core\tests\label_flip_attack_test.py",
+            "eiffel\core\tests\multiclass_models_test.py",
             "eiffel\core\tests\round_store_test.py",
             "eiffel\core\tests\compare_metrics_test.py",
             "eiffel\core\tests\toml_runner_test.py",
