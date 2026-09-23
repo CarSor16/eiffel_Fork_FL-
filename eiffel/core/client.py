@@ -176,6 +176,10 @@ class EiffelClient(NumPyClient):
                 ret["_eiffel_probe_labels"] = encode_array(
                     np.asarray(probe_y), dtype="int16"
                 )
+                if "Attack" in test_set.m.columns:
+                    ret["_eiffel_probe_families"] = json.dumps(
+                        test_set.m["Attack"].iloc[:probe_size].astype(str).tolist()
+                    )
 
         if self.eval_fit:
             test_loss, _, metrics = self.evaluate(self.model.get_weights(), config)
@@ -239,30 +243,52 @@ class EiffelClient(NumPyClient):
 
         return_data: dict[str, Any] = {}
 
-        class_df = test_set.m["Attack"]
+        # Eiffel trains a binary Benign-vs-Attack detector, but the metadata retains
+        # the original attack family.  Report metrics for every family so selective
+        # degradation can be studied as a multiclass-aware NIDS analysis.
+        class_df = test_set.m["Attack"].astype(str)
+        attack_recalls: list[float] = []
+        attack_missrates: list[float] = []
         for label in (c for c in class_df.unique() if c != "Benign"):
-            # compute the confusion matrix for each label (attacks or "Benign")
-            y_true_attack = y_true[class_df == label]
-            y_pred_attack = y_pred[class_df == label]
+            mask = class_df == label
+            y_true_attack = y_true[mask]
+            y_pred_attack = y_pred[mask]
+            _, _, fn, tp = confusion_matrix(
+                y_true_attack, y_pred_attack, labels=(0, 1)
+            ).ravel()
+            denom = tp + fn
+            recall = float(tp / denom) if denom else 0.0
+            missrate = float(fn / denom) if denom else 0.0
+            attack_recalls.append(recall)
+            attack_missrates.append(missrate)
+            return_data[label] = {
+                "recall": recall,
+                "missrate": missrate,
+                "support": int(mask.sum()),
+            }
 
-            # compute the detection rate and miss rate
-            try:
-                tn, _, fn, tp = confusion_matrix(
-                    y_true_attack, y_pred_attack, labels=(0, 1)
-                ).ravel()
-                return_data[label] = {
-                    "recall": tp / (tp + fn),
-                    "missrate": fn / (tp + fn),
-                }
-            except ValueError:
-                # If the confusion matrix is not (2, 2), it means that `y_true_attack`
-                # and `y_pred_attack` are equal, so recall is 1.0 and missrate is 0.0.
-                return_data[label] = {"recall": 1.0, "missrate": 0.0}
+        benign_mask = class_df == "Benign"
+        if bool(benign_mask.any()):
+            benign_pred = y_pred[benign_mask]
+            false_positive_rate = float(np.mean(benign_pred == 1))
+            return_data["Benign"] = {
+                "false_positive_rate": false_positive_rate,
+                "specificity": 1.0 - false_positive_rate,
+                "support": int(benign_mask.sum()),
+            }
 
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=(0, 1)).ravel()
         return_data["global"] = metrics_from_confmat(tn, fp, fn, tp)
+        if attack_recalls:
+            return_data["global"].update(
+                {
+                    "macro_attack_recall": float(np.mean(attack_recalls)),
+                    "min_attack_recall": float(np.min(attack_recalls)),
+                    "macro_attack_missrate": float(np.mean(attack_missrates)),
+                }
+            )
 
-        return_data["global"]["loss"] = loss
+        return_data["global"]["loss"] = float(loss)
         return_data["_cid"] = self.cid
 
         return (loss, len(test_set), {k: json.dumps(v) for k, v in return_data.items()})
