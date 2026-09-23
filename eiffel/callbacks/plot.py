@@ -35,7 +35,9 @@ class PlotterCallback(Callback):
             metrics = json.loads(f)
             self._plot(metrics, output=self.output)
         except FileNotFoundError:
-            print(f"File {self.input} not found.")
+            # Failed/interrupted jobs may end before Eiffel writes result JSON.
+            # The original experiment exception is the useful diagnostic in that case.
+            return
 
     def _plot(self, metrics: dict, output: str) -> None:
         """Generate the plot."""
