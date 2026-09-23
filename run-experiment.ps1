@@ -8,6 +8,7 @@ param(
     [switch]$Attacks,
     [switch]$Analyze,
     [switch]$Tests,
+    [switch]$Smoke,
 
     [string]$RunsRoot = "outputs",
     [string]$AnalysisOutput = "analysis-results",
@@ -178,6 +179,16 @@ try {
         }
         Write-Host ""
         Write-Host "Doctor completed successfully."
+        exit 0
+    }
+
+    if ($Smoke) {
+        Write-Host "Running synthetic client integration smoke test..."
+        & $Python -m pytest -q -s "eiffel\core\tests\synthetic_client_integration_test.py"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Synthetic client smoke test failed."
+        }
+        Write-Host "Synthetic client smoke test completed successfully."
         exit 0
     }
 
