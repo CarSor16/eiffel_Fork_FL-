@@ -1046,6 +1046,14 @@ The lower-level equivalent is:
 
 ### Compare metrics across rounds and attacks
 
+The legacy Hydra plot callback now reads `fit.json` instead of the obsolete
+`metrics.json`, so completed experiments no longer print the misleading
+"metrics.json not found" message. The comparison analyzer prefers metrics stored
+directly in `round_state.h5`; for older runs created before HDF5 metric persistence,
+it automatically falls back to the sibling `distributed.json` and then `fit.json`.
+Runs that contain neither source are skipped and must be rerun before performance
+metrics can be compared.
+
 To recursively analyse all Eiffel runs below outputs/:
 
     .\run.cmd -Analyze
