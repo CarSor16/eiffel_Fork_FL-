@@ -200,3 +200,55 @@ The old `noniid_sign_flip_trimmed.toml` profile is intentionally not copied as a
 runnable profile yet because mapping it silently to FedAvg would change the scientific
 meaning of the experiment. A future instrumented robust-aggregation strategy should be
 added before restoring that profile.
+
+
+## Task modes
+
+The dataset task is explicit in new profiles.
+
+- binary: original Eiffel-compatible Benign-vs-Attack training.
+- family_aware: binary training with metrics retained separately for each attack family.
+- multiclass: experimental true family classification, currently supported by the
+  synthetic_stress dataset only.
+
+For multiclass, the synthetic labels are the family IDs 0..K-1 and supported neural
+models use a K-way softmax output with sparse categorical cross-entropy. Procedural
+model-update attacks remain unchanged because they operate on parameter deltas rather
+than class labels.
+
+Multiclass label_flip is intentionally rejected by the TOML translator. Eiffel's
+existing NFV2 poisoning method is Boolean label inversion; applying it to labels 0..K-1
+would not define a valid class-to-class poisoning objective. A later implementation
+should introduce explicit source_class and destination_class semantics before enabling
+that experiment.
+
+Ready-to-run multiclass profiles include clean, sign flip, scaling, Gaussian noise, LIE,
+gradient mimicry and colluding sign flip, plus quick clean/sign-flip smoke profiles.
+
+    .\run.cmd synthetic_50k_quick_multiclass_clean
+    .\run.cmd synthetic_50k_quick_multiclass_sign_flip
+    .\run.cmd -Suite multiclass -DryRun
+    .\run.cmd -Suite multiclass
+
+## Security validation and analysis commands
+
+The unified launcher can describe attack mechanisms and TOML controls:
+
+    .\run.cmd -Attacks
+
+Focused regression tests:
+
+    .\setup.cmd -Dev
+    .\run.cmd -Tests
+
+Validate one completed HDF5 run:
+
+    .\run.cmd -ValidateHdf5 "outputs\YYYY-MM-DD\HH-MM-SS\round_state.h5"
+
+Compare all stored runs under outputs:
+
+    .\run.cmd -Analyze
+
+The metric-analysis module reads client metrics from round_state.h5 and creates
+round-by-round line plots, final grouped attack bar plots, clean-baseline deltas,
+per-family recall comparisons, CSV exports and multi-seed mean/std aggregation.
