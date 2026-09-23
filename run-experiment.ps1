@@ -9,6 +9,7 @@ param(
     [switch]$Analyze,
     [switch]$Tests,
     [switch]$Smoke,
+    [switch]$Version,
 
     [string]$RunsRoot = "outputs",
     [string]$AnalysisOutput = "analysis-results",
@@ -25,6 +26,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProfilesDir = Join-Path $Root "experiments\toml"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
+$LauncherVersion = "2026-09-23-smoke-failfast-1"
 
 function Get-Profiles {
     if (-not (Test-Path $ProfilesDir)) {
@@ -140,6 +142,18 @@ function Show-AttackHelp {
 }
 
 $Profiles = Get-Profiles
+
+if ($Version) {
+    Write-Host "Eiffel FL Security Lab launcher: $LauncherVersion"
+    exit 0
+}
+
+if (-not $Profile -and $HydraOverrides) {
+    $UnknownOptions = @($HydraOverrides | Where-Object { $_ -like "-*" })
+    if ($UnknownOptions.Count -gt 0) {
+        throw "Unknown launcher option(s): $($UnknownOptions -join ', '). Run '.\run.cmd -List' or update the repository."
+    }
+}
 
 if ($List) {
     Write-Host "Available TOML experiments:"
