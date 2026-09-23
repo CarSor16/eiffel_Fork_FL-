@@ -243,6 +243,102 @@ def _plot_round_metric(
     plt.close(fig)
 
 
+def _round_delta_vs_clean(
+    rows: Sequence[dict[str, object]],
+    metrics: Sequence[str],
+    output_dir: Path,
+) -> list[dict[str, object]]:
+    """Compute and plot per-round attack deltas relative to clean runs.
+
+    For each communication round, the clean baseline is averaged across all clean
+    runs/seeds available at that round. Each attack is then aggregated across its
+    runs/seeds before subtracting the clean mean. This keeps temporal comparisons
+    aligned even when experiments contain repeated seeds.
+    """
+    grouped: dict[tuple[str, int, str], list[float]] = defaultdict(list)
+    for row in rows:
+        attack = str(row["attack"])
+        round_number = int(row["round"])
+        for metric in metrics:
+            value = float(row.get(metric, math.nan))
+            if math.isfinite(value):
+                grouped[(attack, round_number, metric)].append(value)
+
+    clean_round_metric: dict[tuple[int, str], float] = {}
+    for (attack, round_number, metric), values in grouped.items():
+        if attack == "clean" and values:
+            clean_round_metric[(round_number, metric)] = float(np.mean(values))
+
+    delta_rows: list[dict[str, object]] = []
+    attacks = sorted(
+        {
+            attack
+            for attack, _, _ in grouped
+            if attack != "clean"
+        }
+    )
+    for attack in attacks:
+        attack_rounds = sorted(
+            {
+                round_number
+                for label, round_number, _ in grouped
+                if label == attack
+            }
+        )
+        for round_number in attack_rounds:
+            for metric in metrics:
+                baseline = clean_round_metric.get((round_number, metric))
+                values = grouped.get((attack, round_number, metric), [])
+                if baseline is None or not values:
+                    continue
+                delta_rows.append(
+                    {
+                        "attack": attack,
+                        "round": round_number,
+                        "metric": metric,
+                        "delta_vs_clean": float(np.mean(values)) - baseline,
+                    }
+                )
+
+    if not delta_rows:
+        return []
+
+    for metric in metrics:
+        metric_rows = [
+            row for row in delta_rows if str(row["metric"]) == metric
+        ]
+        if not metric_rows:
+            continue
+        fig, ax = plt.subplots(figsize=(9.5, 5.5))
+        for attack in attacks:
+            attack_rows = sorted(
+                (
+                    row
+                    for row in metric_rows
+                    if str(row["attack"]) == attack
+                ),
+                key=lambda row: int(row["round"]),
+            )
+            if not attack_rows:
+                continue
+            rounds = [int(row["round"]) for row in attack_rows]
+            values = [float(row["delta_vs_clean"]) for row in attack_rows]
+            ax.plot(rounds, values, marker="o", linewidth=1.8, label=attack)
+        ax.axhline(0.0, linewidth=1.0)
+        ax.set_xlabel("Communication round")
+        ax.set_ylabel("Difference from clean")
+        ax.set_title(
+            f"{metric.replace('_', ' ').title()} change relative to clean by round"
+        )
+        ax.grid(True, alpha=0.25)
+        ax.legend(loc="best")
+        fig.tight_layout()
+        fig.savefig(output_dir / f"round_delta_{metric}.png", dpi=180)
+        plt.close(fig)
+
+    return delta_rows
+
+
 def _final_rows(
     rows: Sequence[dict[str, object]], metrics: Sequence[str]
 ) -> list[dict[str, object]]:
@@ -585,6 +681,14 @@ def analyse(
             math.isfinite(float(row.get(metric, math.nan))) for row in rows
         ):
             _plot_round_metric(rows, metric, output_dir)
+
+    round_deltas = _round_delta_vs_clean(rows, metrics, output_dir)
+    if round_deltas:
+        _write_csv(
+            output_dir / "round_delta_vs_clean.csv",
+            round_deltas,
+            ("attack", "round", "metric", "delta_vs_clean"),
+        )
 
     finals = _final_rows(rows, metrics)
     _write_csv(
