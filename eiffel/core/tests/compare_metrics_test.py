@@ -88,6 +88,9 @@ def test_analysis_writes_round_final_delta_and_family_outputs(tmp_path):
         "delta_vs_clean.png",
         "round_accuracy.png",
         "round_macro_f1.png",
+        "round_delta_vs_clean.csv",
+        "round_delta_accuracy.png",
+        "round_delta_macro_f1.png",
         "per_family_metrics.csv",
         "final_per_family_recall.png",
         "per_family_recall_delta_vs_clean.csv",
@@ -106,3 +109,24 @@ def test_analysis_writes_round_final_delta_and_family_outputs(tmp_path):
         if row["attack"] == "sign_flip" and row["metric"] == "accuracy"
     )
     assert np.isclose(accuracy_delta, -0.20)
+
+    with (output / "round_delta_vs_clean.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        round_rows = list(csv.DictReader(handle))
+    round_one_delta = next(
+        float(row["delta_vs_clean"])
+        for row in round_rows
+        if row["attack"] == "sign_flip"
+        and row["metric"] == "accuracy"
+        and row["round"] == "1"
+    )
+    round_two_delta = next(
+        float(row["delta_vs_clean"])
+        for row in round_rows
+        if row["attack"] == "sign_flip"
+        and row["metric"] == "accuracy"
+        and row["round"] == "2"
+    )
+    assert np.isclose(round_one_delta, -0.20)
+    assert np.isclose(round_two_delta, -0.20)
