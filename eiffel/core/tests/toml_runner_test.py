@@ -1,6 +1,8 @@
 """Tests for the TOML compatibility translation layer."""
 
-from eiffel.toml_runner import profile_to_overrides
+import pytest
+
+from eiffel.toml_runner import TomlExperimentError, profile_to_overrides
 
 
 def test_sign_flip_translation():
@@ -101,3 +103,60 @@ def test_synthetic_50k_translation():
     assert "datasets.synthetic_stress.dirichlet_alpha=0.5" in overrides
     assert "partitioner=preassigned" in overrides
     assert "model=stress_mlp" in overrides
+
+
+
+def test_synthetic_multiclass_translation():
+    profile = {
+        "experiment": {"seed": 2026, "num_clients": 10, "rounds": 5},
+        "dataset": {
+            "name": "synthetic_stress",
+            "task": "multiclass",
+            "num_classes": 6,
+        },
+        "partition": {"type": "dirichlet", "dirichlet_alpha": 0.5},
+        "model": {"name": "stress_mlp"},
+        "attack": {"mechanism": "sign_flip", "malicious_fraction": 0.2},
+        "aggregation": {"name": "fedavg"},
+    }
+
+    overrides = profile_to_overrides(profile)
+
+    assert "datasets.synthetic_stress.task=multiclass" in overrides
+    assert "++model.task=multiclass" in overrides
+    assert "++model.num_classes=6" in overrides
+    assert "model_attack=sign_flip" in overrides
+    assert "num_clients=8" in overrides
+    assert "num_attackers=2" in overrides
+
+
+def test_multiclass_label_flip_requires_explicit_class_mapping():
+    profile = {
+        "experiment": {"num_clients": 10, "rounds": 5},
+        "dataset": {
+            "name": "synthetic_stress",
+            "task": "multiclass",
+            "num_classes": 6,
+        },
+        "attack": {
+            "mechanism": "label_flip",
+            "malicious_fraction": 0.2,
+            "poison_rate": 0.5,
+        },
+        "aggregation": {"name": "fedavg"},
+    }
+
+    with pytest.raises(TomlExperimentError, match="source_class"):
+        profile_to_overrides(profile)
+
+
+def test_multiclass_is_not_silently_enabled_for_real_nfv2():
+    profile = {
+        "experiment": {"num_clients": 10, "rounds": 5},
+        "dataset": {"name": "cicids", "task": "multiclass"},
+        "attack": {"mechanism": "none", "malicious_fraction": 0.0},
+        "aggregation": {"name": "fedavg"},
+    }
+
+    with pytest.raises(TomlExperimentError, match="synthetic_stress"):
+        profile_to_overrides(profile)
