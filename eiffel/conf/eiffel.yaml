@@ -72,9 +72,9 @@ defaults:
   - poisoning/profile: loud
   - poisoning/type: untargeted
 
-  # Defaults below are framework-related, and have no impact on the experiment.
+  # Framework callback: reads fit.json after a completed run and writes plot.png.
   - callbacks:
-    - plot # TODO: the plot callback is broken since metrics have been modified.
+    - plot
 
   # Use a `config.yaml` file to override user configuration, like the number of clients.
   # Use `setup` to override experiment configuration, like datasets or attack scenarios.
