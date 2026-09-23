@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -110,6 +112,126 @@ def parse_run_arg(value: str) -> RunSpec:
     return RunSpec(label.strip(), Path(raw_path).expanduser().resolve())
 
 
+def _flatten_numeric_metrics(
+    metrics: Mapping[str, object], prefix: str = ""
+) -> dict[str, float]:
+    flat: dict[str, float] = {}
+    for key, value in metrics.items():
+        full_key = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, Mapping):
+            flat.update(_flatten_numeric_metrics(value, full_key))
+        elif isinstance(value, (bool, int, float, np.integer, np.floating)):
+            numeric = float(value)
+            if math.isfinite(numeric):
+                flat[full_key] = numeric
+    return flat
+
+
+def _load_json_phase(run: RunSpec, phase: str) -> dict[str, object]:
+    """Load Eiffel's JSON result files as a fallback for older HDF5 runs."""
+    candidates = (
+        ("distributed.json", "fit.json")
+        if phase == "auto"
+        else (("distributed.json",) if phase == "evaluate" else ("fit.json",))
+    )
+    for filename in candidates:
+        path = run.path.parent / filename
+        if not path.exists():
+            continue
+        try:
+            decoded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(decoded, dict) and decoded:
+            return decoded
+    return {}
+
+
+def _read_json_run_metrics(
+    run: RunSpec, metrics: Sequence[str], phase: str
+) -> list[dict[str, object]]:
+    payload = _load_json_phase(run, phase)
+    if not payload:
+        return []
+
+    grouped: dict[int, dict[str, list[float]]] = defaultdict(
+        lambda: {metric: [] for metric in metrics}
+    )
+    for rounds in payload.values():
+        if not isinstance(rounds, Mapping):
+            continue
+        for round_key, nested_metrics in rounds.items():
+            try:
+                round_number = int(round_key)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(nested_metrics, Mapping):
+                continue
+            decoded = _flatten_numeric_metrics(nested_metrics)
+            for metric in metrics:
+                for key in _metric_candidates(metric):
+                    if key in decoded:
+                        grouped[round_number][metric].append(decoded[key])
+                        break
+
+    rows: list[dict[str, object]] = []
+    for round_number in sorted(grouped):
+        row: dict[str, object] = {
+            "attack": run.label,
+            "run": str(run.path.parent),
+            "round": round_number,
+        }
+        for metric in metrics:
+            observed = grouped[round_number][metric]
+            row[metric] = float(np.mean(observed)) if observed else math.nan
+        if any(math.isfinite(float(row[metric])) for metric in metrics):
+            rows.append(row)
+    return rows
+
+
+def _read_json_per_family(run: RunSpec, phase: str) -> list[dict[str, object]]:
+    payload = _load_json_phase(run, phase)
+    if not payload:
+        return []
+
+    grouped: dict[tuple[int, str, str], list[float]] = defaultdict(list)
+    for rounds in payload.values():
+        if not isinstance(rounds, Mapping):
+            continue
+        for round_key, nested_metrics in rounds.items():
+            try:
+                round_number = int(round_key)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(nested_metrics, Mapping):
+                continue
+            decoded = _flatten_numeric_metrics(nested_metrics)
+            for key, value in decoded.items():
+                if "." not in key:
+                    continue
+                family, metric = key.rsplit(".", 1)
+                if (
+                    family in {"global", "Benign", "fit"}
+                    or metric not in {"precision", "recall", "f1", "missrate"}
+                ):
+                    continue
+                grouped[(round_number, family, metric)].append(value)
+
+    rows: list[dict[str, object]] = []
+    for (round_number, family, metric), observed in sorted(grouped.items()):
+        rows.append(
+            {
+                "attack": run.label,
+                "run": str(run.path.parent),
+                "round": round_number,
+                "family": family,
+                "metric": metric,
+                "value": float(np.mean(observed)),
+            }
+        )
+    return rows
+
+
 def _read_phase_metrics(client: h5py.Group, phase: str) -> dict[str, float]:
     try:
         attrs = client["metrics"][phase].attrs
@@ -137,64 +259,72 @@ def read_run_metrics(
     rows: list[dict[str, object]] = []
     with h5py.File(run.path, "r") as h5:
         clients_root = h5.get("clients")
-        if clients_root is None:
-            return rows
-        for round_name in sorted(clients_root.keys()):
-            round_number = int(round_name.rsplit("_", 1)[-1])
-            values: dict[str, list[float]] = {m: [] for m in metrics}
-            for client in clients_root[round_name].values():
-                decoded = _client_metrics(client, phase)
-                for metric in metrics:
-                    for key in _metric_candidates(metric):
-                        if key in decoded and math.isfinite(decoded[key]):
-                            values[metric].append(decoded[key])
-                            break
-            row: dict[str, object] = {
-                "attack": run.label,
-                "run": str(run.path.parent),
-                "round": round_number,
-            }
-            for metric, observed in values.items():
-                row[metric] = (
-                    float(np.mean(observed)) if observed else math.nan
-                )
-            rows.append(row)
-    return rows
+        if clients_root is not None:
+            for round_name in sorted(clients_root.keys()):
+                round_number = int(round_name.rsplit("_", 1)[-1])
+                values: dict[str, list[float]] = {m: [] for m in metrics}
+                for client in clients_root[round_name].values():
+                    decoded = _client_metrics(client, phase)
+                    for metric in metrics:
+                        for key in _metric_candidates(metric):
+                            if key in decoded and math.isfinite(decoded[key]):
+                                values[metric].append(decoded[key])
+                                break
+                row: dict[str, object] = {
+                    "attack": run.label,
+                    "run": str(run.path.parent),
+                    "round": round_number,
+                }
+                for metric, observed in values.items():
+                    row[metric] = (
+                        float(np.mean(observed)) if observed else math.nan
+                    )
+                if any(
+                    math.isfinite(float(row[metric])) for metric in metrics
+                ):
+                    rows.append(row)
+
+    if rows:
+        return rows
+    return _read_json_run_metrics(run, metrics, phase)
 
 
 def read_per_family(run: RunSpec, phase: str = "auto") -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     with h5py.File(run.path, "r") as h5:
         clients_root = h5.get("clients")
-        if clients_root is None:
-            return rows
-        for round_name in sorted(clients_root.keys()):
-            round_number = int(round_name.rsplit("_", 1)[-1])
-            values: dict[tuple[str, str], list[float]] = defaultdict(list)
-            for client in clients_root[round_name].values():
-                for key, value in _client_metrics(client, phase).items():
-                    if "." not in key:
-                        continue
-                    family, metric = key.rsplit(".", 1)
-                    if (
-                        family in {"global", "Benign", "fit"}
-                        or metric not in {"precision", "recall", "f1", "missrate"}
-                    ):
-                        continue
-                    if math.isfinite(value):
-                        values[(family, metric)].append(value)
-            for (family, metric), observed in sorted(values.items()):
-                rows.append(
-                    {
-                        "attack": run.label,
-                        "run": str(run.path.parent),
-                        "round": round_number,
-                        "family": family,
-                        "metric": metric,
-                        "value": float(np.mean(observed)),
-                    }
-                )
-    return rows
+        if clients_root is not None:
+            for round_name in sorted(clients_root.keys()):
+                round_number = int(round_name.rsplit("_", 1)[-1])
+                values: dict[tuple[str, str], list[float]] = defaultdict(list)
+                for client in clients_root[round_name].values():
+                    for key, value in _client_metrics(client, phase).items():
+                        if "." not in key:
+                            continue
+                        family, metric = key.rsplit(".", 1)
+                        if (
+                            family in {"global", "Benign", "fit"}
+                            or metric
+                            not in {"precision", "recall", "f1", "missrate"}
+                        ):
+                            continue
+                        if math.isfinite(value):
+                            values[(family, metric)].append(value)
+                for (family, metric), observed in sorted(values.items()):
+                    rows.append(
+                        {
+                            "attack": run.label,
+                            "run": str(run.path.parent),
+                            "round": round_number,
+                            "family": family,
+                            "metric": metric,
+                            "value": float(np.mean(observed)),
+                        }
+                    )
+
+    if rows:
+        return rows
+    return _read_json_per_family(run, phase)
 
 
 def _write_csv(
@@ -665,11 +795,31 @@ def analyse(
 
     rows: list[dict[str, object]] = []
     family_rows: list[dict[str, object]] = []
+    skipped: list[Path] = []
     for run in run_list:
-        rows.extend(read_run_metrics(run, metrics, phase=phase))
+        run_rows = read_run_metrics(run, metrics, phase=phase)
+        if not run_rows:
+            skipped.append(run.path)
+            continue
+        rows.extend(run_rows)
         family_rows.extend(read_per_family(run, phase=phase))
+
+    if skipped:
+        print(
+            "Skipped runs without usable metrics (neither HDF5 metrics nor "
+            "distributed.json/fit.json):"
+        )
+        for path in skipped:
+            print(f"  - {path}")
+
     if not rows:
-        raise ValueError("No client metrics found in the supplied HDF5 files.")
+        raise ValueError(
+            "No usable client metrics were found. The discovered round_state.h5 "
+            "files contain no persisted client metrics and their run directories "
+            "also contain no usable distributed.json/fit.json. These runs likely "
+            "predate metric persistence; rerun at least clean plus one attack with "
+            "the current branch."
+        )
 
     _write_csv(
         output_dir / "round_metrics.csv",
