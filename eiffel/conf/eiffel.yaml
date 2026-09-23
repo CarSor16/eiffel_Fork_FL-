@@ -48,6 +48,7 @@ experiment:
   strategy: ${strategy}
   model_fn: ${model}
   partitioner: ${partitioner}
+  storage: ${storage}
 
   pools: "${pools}"
 
@@ -62,16 +63,19 @@ defaults:
 
   #- datasets: ???
 
-  - strategy: fedavg
+  - storage: default
+  - model_attack: none
+  - strategy: instrumented_fedavg
   - model: popoola
   - partitioner: dumb
 
   - poisoning/profile: loud
   - poisoning/type: untargeted
 
-  # Defaults below are framework-related, and have no impact on the experiment.
-  - callbacks:
-    - plot # TODO: the plot callback is broken since metrics have been modified.
+  # Legacy per-run plot callback is intentionally disabled by default.
+  # Thesis plots are generated after the run by:
+  #   python -m eiffel.analysis.compact_round_analysis
+  # The callback group remains available for explicit legacy experiments.
 
   # Use a `config.yaml` file to override user configuration, like the number of clients.
   # Use `setup` to override experiment configuration, like datasets or attack scenarios.

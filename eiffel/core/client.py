@@ -15,7 +15,7 @@ from flwr.client import Client, NumPyClient
 from flwr.common import Config, Scalar
 from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
 from keras.callbacks import History
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, f1_score, matthews_corrcoef, precision_recall_fscore_support
 from tensorflow import keras
 
 from eiffel.datasets.dataset import Dataset, DatasetHandle
@@ -23,6 +23,7 @@ from eiffel.datasets.poisoning import PoisonIns, PoisonTask
 from eiffel.utils import set_seed
 from eiffel.utils.logging import VerbLevel
 from eiffel.utils.typing import EiffelCID, MetricsDict, NDArray
+from eiffel.storage import encode_array
 
 from .pool import Pool
 
@@ -155,6 +156,31 @@ class EiffelClient(NumPyClient):
             "_cid": self.cid,
         }
 
+        # Capture a compact, deterministic first inference for round-level analysis.
+        # The payload is transiently base64 encoded because Flower metrics accept
+        # scalar values; the instrumented strategy decodes it and stores float16 HDF5.
+        if bool(config.get("capture_inference", False)):
+            test_set: Dataset = ray.get(self.data_holder.get.remote("test"))
+            probe_size = min(int(config.get("probe_size", 256)), len(test_set))
+            if probe_size > 0:
+                probe_x = test_set.X.iloc[:probe_size].to_numpy()
+                probe_y = test_set.y.iloc[:probe_size].to_numpy()
+                inference = self.model.predict(
+                    probe_x,
+                    batch_size=int(config["batch_size"]),
+                    verbose=0,
+                )
+                ret["_eiffel_inference"] = encode_array(
+                    np.asarray(inference), dtype="float16"
+                )
+                ret["_eiffel_probe_labels"] = encode_array(
+                    np.asarray(probe_y), dtype="int16"
+                )
+                if "Attack" in test_set.m.columns:
+                    ret["_eiffel_probe_families"] = json.dumps(
+                        test_set.m["Attack"].iloc[:probe_size].astype(str).tolist()
+                    )
+
         if self.eval_fit:
             test_loss, _, metrics = self.evaluate(self.model.get_weights(), config)
             ret.update(metrics)
@@ -211,36 +237,122 @@ class EiffelClient(NumPyClient):
             verbose=self.verbose,
         )
 
-        y_pred = np.around(inferences).astype(int).reshape(-1)
-
         y_true = test_set.y.to_numpy().astype(int)
+        inference_array = np.asarray(inferences)
+        multiclass = inference_array.ndim > 1 and inference_array.shape[-1] > 1
+        y_pred = (
+            np.argmax(inference_array, axis=1).astype(int).reshape(-1)
+            if multiclass
+            else (inference_array.reshape(-1) >= 0.5).astype(int)
+        )
 
         return_data: dict[str, Any] = {}
+        class_df = test_set.m["Attack"].astype(str)
 
-        class_df = test_set.m["Attack"]
-        for label in (c for c in class_df.unique() if c != "Benign"):
-            # compute the confusion matrix for each label (attacks or "Benign")
-            y_true_attack = y_true[class_df == label]
-            y_pred_attack = y_pred[class_df == label]
-
-            # compute the detection rate and miss rate
-            try:
-                tn, _, fn, tp = confusion_matrix(
+        if multiclass:
+            labels = sorted(int(v) for v in np.unique(y_true))
+            precision, recall, f1, support = precision_recall_fscore_support(
+                y_true,
+                y_pred,
+                labels=labels,
+                zero_division=0,
+            )
+            class_names: dict[int, str] = {}
+            for class_id in labels:
+                names = class_df[y_true == class_id].value_counts()
+                class_names[class_id] = (
+                    str(names.index[0]) if len(names) else f"class_{class_id}"
+                )
+            attack_recalls: list[float] = []
+            for idx, class_id in enumerate(labels):
+                name = class_names[class_id]
+                return_data[name] = {
+                    "precision": float(precision[idx]),
+                    "recall": float(recall[idx]),
+                    "f1": float(f1[idx]),
+                    "missrate": float(1.0 - recall[idx]),
+                    "support": int(support[idx]),
+                }
+                if name != "Benign":
+                    attack_recalls.append(float(recall[idx]))
+            return_data["global"] = {
+                "accuracy": float(np.mean(y_pred == y_true)),
+                "macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
+                "weighted_f1": float(
+                    f1_score(y_true, y_pred, average="weighted", zero_division=0)
+                ),
+                "mcc": float(matthews_corrcoef(y_true, y_pred)),
+                "num_classes": float(len(labels)),
+                "loss": float(loss),
+            }
+            if attack_recalls:
+                return_data["global"].update(
+                    {
+                        "macro_attack_recall": float(np.mean(attack_recalls)),
+                        "min_attack_recall": float(np.min(attack_recalls)),
+                        "macro_attack_missrate": float(
+                            np.mean([1.0 - value for value in attack_recalls])
+                        ),
+                    }
+                )
+            return_data["confusion_matrix"] = confusion_matrix(
+                y_true, y_pred, labels=labels
+            ).tolist()
+        else:
+            # Binary Benign-vs-Attack training with per-family recall/miss-rate.
+            attack_recalls = []
+            attack_missrates = []
+            for label in (name for name in class_df.unique() if name != "Benign"):
+                mask = class_df == label
+                y_true_attack = y_true[mask]
+                y_pred_attack = y_pred[mask]
+                _, _, fn, tp = confusion_matrix(
                     y_true_attack, y_pred_attack, labels=(0, 1)
                 ).ravel()
+                denom = tp + fn
+                recall_value = float(tp / denom) if denom else 0.0
+                missrate_value = float(fn / denom) if denom else 0.0
+                attack_recalls.append(recall_value)
+                attack_missrates.append(missrate_value)
                 return_data[label] = {
-                    "recall": tp / (tp + fn),
-                    "missrate": fn / (tp + fn),
+                    "recall": recall_value,
+                    "missrate": missrate_value,
+                    "support": int(mask.sum()),
                 }
-            except ValueError:
-                # If the confusion matrix is not (2, 2), it means that `y_true_attack`
-                # and `y_pred_attack` are equal, so recall is 1.0 and missrate is 0.0.
-                return_data[label] = {"recall": 1.0, "missrate": 0.0}
 
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-        return_data["global"] = metrics_from_confmat(tn, fp, fn, tp)
+            benign_mask = class_df == "Benign"
+            if bool(benign_mask.any()):
+                benign_pred = y_pred[benign_mask]
+                false_positive_rate = float(np.mean(benign_pred == 1))
+                return_data["Benign"] = {
+                    "false_positive_rate": false_positive_rate,
+                    "specificity": 1.0 - false_positive_rate,
+                    "support": int(benign_mask.sum()),
+                }
 
-        return_data["global"]["loss"] = loss
+            tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=(0, 1)).ravel()
+            return_data["global"] = metrics_from_confmat(tn, fp, fn, tp)
+            return_data["global"].update(
+                {
+                    "macro_f1": float(
+                        f1_score(y_true, y_pred, average="macro", zero_division=0)
+                    ),
+                    "weighted_f1": float(
+                        f1_score(y_true, y_pred, average="weighted", zero_division=0)
+                    ),
+                    "mcc": float(matthews_corrcoef(y_true, y_pred)),
+                }
+            )
+            if attack_recalls:
+                return_data["global"].update(
+                    {
+                        "macro_attack_recall": float(np.mean(attack_recalls)),
+                        "min_attack_recall": float(np.min(attack_recalls)),
+                        "macro_attack_missrate": float(np.mean(attack_missrates)),
+                    }
+                )
+            return_data["global"]["loss"] = float(loss)
+
         return_data["_cid"] = self.cid
 
         return (loss, len(test_set), {k: json.dumps(v) for k, v in return_data.items()})
@@ -276,8 +388,13 @@ def mk_client(
     cid: EiffelCID,
     mappings: dict[EiffelCID, tuple[ray.ObjectRef, Optional[PoisonIns], keras.Model]],
     seed: int,
-) -> Client:
-    """Return a client based on its CID."""
+) -> NumPyClient:
+    """Return a Flower 1.5-compatible NumPyClient based on its CID.
+
+    Flower's simulation layer accepts a ClientLike and wraps NumPyClient instances
+    internally.  Eiffel pins Flower 1.5.0, where NumPyClient does not expose the
+    newer instance method `to_client()`.
+    """
     if cid not in mappings:
         raise ValueError(f"Client `{cid}` not found in mappings.")
 
@@ -289,7 +406,7 @@ def mk_client(
         model_fn(ray.get(handle.get.remote("train")).X.shape[1]),
         seed=seed,
         poison_ins=attack,
-    ).to_client()
+    )
 
 
 def mean_absolute_error(x_orig: pd.DataFrame, x_pred: pd.DataFrame) -> np.ndarray:
