@@ -15,7 +15,7 @@ from flwr.client import Client, NumPyClient
 from flwr.common import Config, Scalar
 from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
 from keras.callbacks import History
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, f1_score, matthews_corrcoef, precision_recall_fscore_support
 from tensorflow import keras
 
 from eiffel.datasets.dataset import Dataset, DatasetHandle
@@ -237,58 +237,122 @@ class EiffelClient(NumPyClient):
             verbose=self.verbose,
         )
 
-        y_pred = np.around(inferences).astype(int).reshape(-1)
-
         y_true = test_set.y.to_numpy().astype(int)
+        inference_array = np.asarray(inferences)
+        multiclass = inference_array.ndim > 1 and inference_array.shape[-1] > 1
+        y_pred = (
+            np.argmax(inference_array, axis=1).astype(int).reshape(-1)
+            if multiclass
+            else (inference_array.reshape(-1) >= 0.5).astype(int)
+        )
 
         return_data: dict[str, Any] = {}
-
-        # Eiffel trains a binary Benign-vs-Attack detector, but the metadata retains
-        # the original attack family.  Report metrics for every family so selective
-        # degradation can be studied as a multiclass-aware NIDS analysis.
         class_df = test_set.m["Attack"].astype(str)
-        attack_recalls: list[float] = []
-        attack_missrates: list[float] = []
-        for label in (c for c in class_df.unique() if c != "Benign"):
-            mask = class_df == label
-            y_true_attack = y_true[mask]
-            y_pred_attack = y_pred[mask]
-            _, _, fn, tp = confusion_matrix(
-                y_true_attack, y_pred_attack, labels=(0, 1)
-            ).ravel()
-            denom = tp + fn
-            recall = float(tp / denom) if denom else 0.0
-            missrate = float(fn / denom) if denom else 0.0
-            attack_recalls.append(recall)
-            attack_missrates.append(missrate)
-            return_data[label] = {
-                "recall": recall,
-                "missrate": missrate,
-                "support": int(mask.sum()),
-            }
 
-        benign_mask = class_df == "Benign"
-        if bool(benign_mask.any()):
-            benign_pred = y_pred[benign_mask]
-            false_positive_rate = float(np.mean(benign_pred == 1))
-            return_data["Benign"] = {
-                "false_positive_rate": false_positive_rate,
-                "specificity": 1.0 - false_positive_rate,
-                "support": int(benign_mask.sum()),
+        if multiclass:
+            labels = sorted(int(v) for v in np.unique(y_true))
+            precision, recall, f1, support = precision_recall_fscore_support(
+                y_true,
+                y_pred,
+                labels=labels,
+                zero_division=0,
+            )
+            class_names: dict[int, str] = {}
+            for class_id in labels:
+                names = class_df[y_true == class_id].value_counts()
+                class_names[class_id] = (
+                    str(names.index[0]) if len(names) else f"class_{class_id}"
+                )
+            attack_recalls: list[float] = []
+            for idx, class_id in enumerate(labels):
+                name = class_names[class_id]
+                return_data[name] = {
+                    "precision": float(precision[idx]),
+                    "recall": float(recall[idx]),
+                    "f1": float(f1[idx]),
+                    "missrate": float(1.0 - recall[idx]),
+                    "support": int(support[idx]),
+                }
+                if name != "Benign":
+                    attack_recalls.append(float(recall[idx]))
+            return_data["global"] = {
+                "accuracy": float(np.mean(y_pred == y_true)),
+                "macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
+                "weighted_f1": float(
+                    f1_score(y_true, y_pred, average="weighted", zero_division=0)
+                ),
+                "mcc": float(matthews_corrcoef(y_true, y_pred)),
+                "num_classes": float(len(labels)),
+                "loss": float(loss),
             }
+            if attack_recalls:
+                return_data["global"].update(
+                    {
+                        "macro_attack_recall": float(np.mean(attack_recalls)),
+                        "min_attack_recall": float(np.min(attack_recalls)),
+                        "macro_attack_missrate": float(
+                            np.mean([1.0 - value for value in attack_recalls])
+                        ),
+                    }
+                )
+            return_data["confusion_matrix"] = confusion_matrix(
+                y_true, y_pred, labels=labels
+            ).tolist()
+        else:
+            # Binary Benign-vs-Attack training with per-family recall/miss-rate.
+            attack_recalls = []
+            attack_missrates = []
+            for label in (name for name in class_df.unique() if name != "Benign"):
+                mask = class_df == label
+                y_true_attack = y_true[mask]
+                y_pred_attack = y_pred[mask]
+                _, _, fn, tp = confusion_matrix(
+                    y_true_attack, y_pred_attack, labels=(0, 1)
+                ).ravel()
+                denom = tp + fn
+                recall_value = float(tp / denom) if denom else 0.0
+                missrate_value = float(fn / denom) if denom else 0.0
+                attack_recalls.append(recall_value)
+                attack_missrates.append(missrate_value)
+                return_data[label] = {
+                    "recall": recall_value,
+                    "missrate": missrate_value,
+                    "support": int(mask.sum()),
+                }
 
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=(0, 1)).ravel()
-        return_data["global"] = metrics_from_confmat(tn, fp, fn, tp)
-        if attack_recalls:
+            benign_mask = class_df == "Benign"
+            if bool(benign_mask.any()):
+                benign_pred = y_pred[benign_mask]
+                false_positive_rate = float(np.mean(benign_pred == 1))
+                return_data["Benign"] = {
+                    "false_positive_rate": false_positive_rate,
+                    "specificity": 1.0 - false_positive_rate,
+                    "support": int(benign_mask.sum()),
+                }
+
+            tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=(0, 1)).ravel()
+            return_data["global"] = metrics_from_confmat(tn, fp, fn, tp)
             return_data["global"].update(
                 {
-                    "macro_attack_recall": float(np.mean(attack_recalls)),
-                    "min_attack_recall": float(np.min(attack_recalls)),
-                    "macro_attack_missrate": float(np.mean(attack_missrates)),
+                    "macro_f1": float(
+                        f1_score(y_true, y_pred, average="macro", zero_division=0)
+                    ),
+                    "weighted_f1": float(
+                        f1_score(y_true, y_pred, average="weighted", zero_division=0)
+                    ),
+                    "mcc": float(matthews_corrcoef(y_true, y_pred)),
                 }
             )
+            if attack_recalls:
+                return_data["global"].update(
+                    {
+                        "macro_attack_recall": float(np.mean(attack_recalls)),
+                        "min_attack_recall": float(np.min(attack_recalls)),
+                        "macro_attack_missrate": float(np.mean(attack_missrates)),
+                    }
+                )
+            return_data["global"]["loss"] = float(loss)
 
-        return_data["global"]["loss"] = float(loss)
         return_data["_cid"] = self.cid
 
         return (loss, len(test_set), {k: json.dumps(v) for k, v in return_data.items()})
