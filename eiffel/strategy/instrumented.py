@@ -38,6 +38,24 @@ def _plain(value: Any) -> Any:
     return value
 
 
+def _failure_summary(failures: list[Any], limit: int = 5) -> str:
+    """Format Flower client failures without assuming one concrete failure shape."""
+    items: list[str] = []
+    for failure in failures[:limit]:
+        if isinstance(failure, BaseException):
+            items.append(f"{type(failure).__name__}: {failure}")
+            continue
+        if isinstance(failure, tuple) and len(failure) == 2:
+            client, result = failure
+            cid = getattr(client, "cid", "<unknown>")
+            status = getattr(result, "status", None)
+            items.append(f"client={cid} status={status!r}")
+            continue
+        items.append(repr(failure))
+    suffix = "" if len(failures) <= limit else f"; +{len(failures) - limit} more"
+    return "; ".join(items) + suffix
+
+
 class InstrumentedFedAvg(FedAvg):
     """FedAvg that preserves raw round state and supports procedural model attacks."""
 
@@ -116,7 +134,23 @@ class InstrumentedFedAvg(FedAvg):
 
     def aggregate_fit(self, server_round, results, failures):
         if not results:
-            return super().aggregate_fit(server_round, results, failures)
+            if failures:
+                details = _failure_summary(list(failures))
+                raise RuntimeError(
+                    f"All clients failed during fit in round {server_round}. "
+                    f"Flower reported {len(failures)} failure(s). {details}"
+                )
+            raise RuntimeError(
+                f"Round {server_round} produced no fit results and no explicit "
+                "Flower failures. Refusing to create an empty experiment."
+            )
+        if failures:
+            logger.warning(
+                "Round %s fit completed with %s client failure(s): %s",
+                server_round,
+                len(failures),
+                _failure_summary(list(failures)),
+            )
         if self._global_weights is None:
             logger.warning(
                 "InstrumentedFedAvg has no previous global weights; raw update capture "
@@ -218,6 +252,19 @@ class InstrumentedFedAvg(FedAvg):
         failures,
     ):
         """Persist distributed evaluation metrics before normal FedAvg aggregation."""
+        if not results and failures:
+            details = _failure_summary(list(failures))
+            raise RuntimeError(
+                f"All clients failed during evaluation in round {server_round}. "
+                f"Flower reported {len(failures)} failure(s). {details}"
+            )
+        if failures:
+            logger.warning(
+                "Round %s evaluation completed with %s client failure(s): %s",
+                server_round,
+                len(failures),
+                _failure_summary(list(failures)),
+            )
         for client, evaluate_res in results:
             self.store.save_client_metrics(
                 int(server_round),
