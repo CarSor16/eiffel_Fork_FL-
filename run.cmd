@@ -7,7 +7,7 @@ if /I "%~1"=="-Smoke" (
         exit /b 1
     )
     echo Running synthetic client integration smoke test...
-    "%~dp0.venv\Scripts\python.exe" -m pytest -q -s "%~dp0eiffel\core\tests\synthetic_client_integration_test.py"
+    "%~dp0.venv\Scripts\python.exe" -m pytest -q -s "%~dp0eiffel\core\tests\synthetic_client_integration_test.py" "%~dp0eiffel\core\tests\synthetic_flower_integration_test.py"
     if errorlevel 1 exit /b 1
     echo Synthetic client smoke test completed successfully.
     exit /b 0
