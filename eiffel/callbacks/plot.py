@@ -22,7 +22,7 @@ class PlotterCallback(Callback):
     For reference, see: https://hydra.cc/docs/experimental/callbacks/.
     """
 
-    def __init__(self, output: str, input: str = "metrics.json") -> None:
+    def __init__(self, output: str, input: str = "fit.json") -> None:
         self.input = input
         self.output = output
 
