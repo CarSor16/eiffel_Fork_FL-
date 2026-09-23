@@ -987,3 +987,97 @@ This repository is derived from:
 The original Eiffel framework is retained as the architectural and experimental foundation of this fork.
 
 The fork is being extended for research on adversarial Federated Learning in network-security applications, with particular emphasis on Federated Intrusion Detection Systems.
+
+
+---
+
+## FL-security validation, multiclass and metric comparison
+
+The research launcher now also exposes the security-specific validation and analysis
+workflow. To print the supported attacks, their meaning, temporal schedules and the
+main TOML parameters:
+
+    .\run.cmd -Attacks
+
+Run the focused tests for procedural attacks, schedules, synthetic task modes, HDF5
+round storage and metric plots:
+
+    .\setup.cmd -Dev
+    .\run.cmd -Tests
+
+The complete binary/family-aware synthetic suite remains:
+
+    .\run.cmd -Suite synthetic50k
+
+A separate experimental true-multiclass synthetic suite is available for model
+poisoning attacks:
+
+    .\run.cmd -Suite multiclass
+
+It trains directly on the six family IDs with a softmax classifier and sparse
+categorical cross-entropy. The corresponding quick smoke profiles are:
+
+    .\run.cmd synthetic_50k_quick_multiclass_clean
+    .\run.cmd synthetic_50k_quick_multiclass_sign_flip
+
+The binary Eiffel/Lavaur-compatible path remains the primary baseline. A TOML can use
+dataset.task = "binary", or explicitly request binary training with family-level
+reporting using dataset.task = "family_aware". For the synthetic stress dataset only,
+dataset.task = "multiclass" with num_classes = 6 enables true multiclass training.
+
+Model-update attacks are architecture/task agnostic and can therefore be used in
+multiclass mode. Multiclass label flipping is intentionally rejected for now: Eiffel's
+original poisoning operation is a binary Boolean label flip, so a scientifically valid
+multiclass version must first define an explicit source-class -> destination-class
+mapping instead of silently applying the binary operation to labels 0..5.
+
+### Validate a round-state file
+
+Every completed run can be checked for the HDF5 invariants required by the analysis:
+round 0 global weights, previous/current global states, submitted-update shapes and
+float32 dtypes, finite values, malicious/attack flags, pre-attack updates when required,
+float16 inference capture, int16 probe labels and last_complete_round.
+
+    .\run.cmd -ValidateHdf5 "outputs\YYYY-MM-DD\HH-MM-SS\round_state.h5"
+
+The lower-level equivalent is:
+
+    .\.venv\Scripts\python.exe -m eiffel.analysis.validate_round_state "outputs\YYYY-MM-DD\HH-MM-SS\round_state.h5"
+
+### Compare metrics across rounds and attacks
+
+To recursively analyse all Eiffel runs below outputs/:
+
+    .\run.cmd -Analyze
+
+Custom input/output roots can be selected with:
+
+    .\run.cmd -Analyze -RunsRoot "outputs" -AnalysisOutput "analysis-results"
+
+The analysis reads the metrics already persisted in round_state.h5; training does not
+need to be repeated. It produces CSV tables plus line plots for each metric across
+communication rounds, a grouped bar plot comparing final-round metrics across attacks,
+a final-metric delta plot relative to clean, final per-family recall comparisons, and
+per-family recall deltas relative to clean.
+
+When several runs have the same inferred attack label, for example different seeds,
+round trends and final attack comparisons aggregate them; final bars include standard
+deviation error bars. For historical or manually organised runs, labels can be supplied
+explicitly:
+
+    .\.venv\Scripts\python.exe -m eiffel.analysis.compare_metrics --run clean="path\to\clean\round_state.h5" --run sign_flip="path\to\sign_flip\round_state.h5" --output-dir "analysis-results"
+
+The default global metrics include accuracy, F1 where available, macro-F1, weighted-F1,
+recall, miss rate, MCC, macro attack-family recall and minimum attack-family recall.
+Per-family precision/recall/F1/miss-rate values are exported separately whenever the run
+contains them.
+
+### Hydra and TOML
+
+Hydra has not been removed. The supported workflow remains TOML experiment profile ->
+eiffel.toml_runner -> Hydra composition/overrides -> EIFFeL + Flower.
+
+TOML is the stable user-facing experiment description, while Hydra remains useful for
+configuration groups, command-line overrides, reproducibility, output directories and
+future sweeps. A normal named TOML experiment can still receive a temporary Hydra
+override from .\run.cmd without changing the committed profile.
