@@ -941,11 +941,11 @@ def analyse(
 
     if not rows:
         raise ValueError(
-            "No usable client metrics were found. The discovered round_state.h5 "
-            "files contain no persisted client metrics and their run directories "
-            "also contain no usable distributed.json/fit.json. These runs likely "
-            "predate metric persistence; rerun at least clean plus one attack with "
-            "the current branch."
+            "No usable client metrics were found. The discovered runs reached "
+            "neither HDF5 client-round persistence nor Flower's fit/distributed "
+            "metric history. This normally means client fit/evaluation failed before "
+            "aggregation. Re-run a quick profile with the current branch: the "
+            "instrumented strategy now fails fast and prints the client exception."
         )
 
     _write_csv(
