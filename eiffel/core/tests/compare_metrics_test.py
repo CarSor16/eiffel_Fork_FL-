@@ -10,8 +10,6 @@ from eiffel.storage.round_store import RoundStore
 
 def _write_run(path, *, mechanism, accuracy, macro_f1, botnet_recall):
     weights = [np.array([1.0], dtype=np.float32)]
-    for round_number in (0,):
-        pass
     with RoundStore(path) as store:
         store.save_global(0, weights)
         for round_number in (1, 2):
@@ -92,6 +90,8 @@ def test_analysis_writes_round_final_delta_and_family_outputs(tmp_path):
         "round_macro_f1.png",
         "per_family_metrics.csv",
         "final_per_family_recall.png",
+        "per_family_recall_delta_vs_clean.csv",
+        "per_family_recall_delta_vs_clean.png",
     }
     assert expected.issubset({path.name for path in output.iterdir()})
 
