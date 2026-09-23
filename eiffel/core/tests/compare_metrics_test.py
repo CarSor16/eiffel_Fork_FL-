@@ -1,6 +1,7 @@
 """Tests for round/attack metric comparison outputs."""
 
 import csv
+import json
 
 import numpy as np
 
@@ -130,3 +131,77 @@ def test_analysis_writes_round_final_delta_and_family_outputs(tmp_path):
     )
     assert np.isclose(round_one_delta, -0.20)
     assert np.isclose(round_two_delta, -0.20)
+
+
+
+def test_analysis_falls_back_to_eiffel_json_for_legacy_hdf5(tmp_path):
+    run_dir = tmp_path / "legacy_clean"
+    run_dir.mkdir()
+    h5_path = run_dir / "round_state.h5"
+    weights = [np.array([1.0], dtype=np.float32)]
+
+    # Simulate an older round_state.h5 that stores FL state but no client metrics.
+    with RoundStore(h5_path) as store:
+        store.save_global(0, weights)
+        store.save_client(
+            1,
+            "benign_0",
+            submitted_update=[np.array([0.1], dtype=np.float32)],
+            malicious=False,
+            attack_active=False,
+            mechanism="none",
+        )
+        store.save_round_metadata(
+            1,
+            attack_mechanism="none",
+            attack_multiplier=0.0,
+            malicious_clients=0,
+        )
+        store.save_global(1, [np.array([1.1], dtype=np.float32)])
+        store.mark_round_complete(1)
+
+    distributed = {
+        "benign_0": {
+            "1": {
+                "global": {
+                    "accuracy": 0.81,
+                    "macro_f1": 0.78,
+                },
+                "Botnet": {
+                    "recall": 0.66,
+                    "missrate": 0.34,
+                },
+            }
+        }
+    }
+    (run_dir / "distributed.json").write_text(
+        json.dumps(distributed), encoding="utf-8"
+    )
+
+    output = tmp_path / "legacy_analysis"
+    rc = analyse(
+        [RunSpec("clean", h5_path)],
+        output,
+        ("accuracy", "macro_f1"),
+        "auto",
+    )
+
+    assert rc == 0
+    with (output / "round_metrics.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 1
+    assert np.isclose(float(rows[0]["accuracy"]), 0.81)
+    assert np.isclose(float(rows[0]["macro_f1"]), 0.78)
+
+    with (output / "per_family_metrics.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        family_rows = list(csv.DictReader(handle))
+    botnet_recall = next(
+        float(row["value"])
+        for row in family_rows
+        if row["family"] == "Botnet" and row["metric"] == "recall"
+    )
+    assert np.isclose(botnet_recall, 0.66)
