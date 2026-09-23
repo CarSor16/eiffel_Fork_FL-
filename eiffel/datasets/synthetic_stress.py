@@ -8,9 +8,10 @@ samples = 50,000 samples) with Dirichlet label skew and client-specific covariat
 A separate central/common test set (default: 12,000 samples) is generated with a smaller
 distribution shift.
 
-The metadata keeps six traffic families while the supervised target is binary:
-Benign=0, every attack family=1. This lets Eiffel's binary models and label-flipping
-logic work unchanged while still allowing per-attack-family evaluation.
+The metadata keeps six traffic families. By default the supervised target is binary
+(Benign=0, every attack family=1) for Eiffel/Lavaur compatibility. An experimental
+multiclass task exposes the family id directly (0..K-1) for softmax models and
+model-update attacks; binary Eiffel label flipping remains intentionally separate.
 """
 
 from __future__ import annotations
@@ -285,6 +286,7 @@ def load_data(
     outlier_fraction: float = 0.012,
     dirichlet_alpha: float = 0.5,
     partition_mode: str = "dirichlet",
+    task: str = "binary",
     key: str = "synthetic_stress_50k",
     _default_target: Sequence[str] | None = None,
     **kwargs,
@@ -304,6 +306,12 @@ def load_data(
         redundant_features, num_features - informative_features
     )
     latent_dim = min(latent_dim, num_features)
+
+    task = str(task).lower()
+    if task in {"family_aware", "multiclass_aware"}:
+        task = "binary"
+    if task not in {"binary", "multiclass"}:
+        raise ValueError("task must be 'binary' or 'multiclass'")
 
     names = _class_names(num_classes)
     base = _base_probabilities(
@@ -355,13 +363,25 @@ def load_data(
             outlier_fraction=outlier_fraction,
         )
 
-        binary_target = (family_labels != 0).astype(np.int64)
+        if task == "binary":
+            supervised_target = (family_labels != 0).astype(np.int64)
+        else:
+            supervised_target = family_labels.astype(np.int64).copy()
+
         if train_label_noise > 0.0:
             noise_mask = rng.random(samples_per_client) < train_label_noise
-            binary_target[noise_mask] = 1 - binary_target[noise_mask]
+            if task == "binary":
+                supervised_target[noise_mask] = 1 - supervised_target[noise_mask]
+            elif np.any(noise_mask):
+                offsets = rng.integers(
+                    1, num_classes, size=int(noise_mask.sum())
+                )
+                supervised_target[noise_mask] = (
+                    supervised_target[noise_mask] + offsets
+                ) % num_classes
 
         feature_blocks.append(features)
-        target_blocks.append(binary_target)
+        target_blocks.append(supervised_target)
         metadata_blocks.append(
             pd.DataFrame(
                 {
@@ -399,7 +419,11 @@ def load_data(
         central_shift_std=central_shift_std,
         outlier_fraction=outlier_fraction,
     )
-    test_target = (test_family_labels != 0).astype(np.int64)
+    test_target = (
+        (test_family_labels != 0).astype(np.int64)
+        if task == "binary"
+        else test_family_labels.astype(np.int64)
+    )
 
     feature_blocks.append(test_features)
     target_blocks.append(test_target)
