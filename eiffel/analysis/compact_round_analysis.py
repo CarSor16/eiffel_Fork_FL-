@@ -71,14 +71,24 @@ def _audit_value(client: h5py.Group, metric: str) -> float:
     return value if math.isfinite(value) else math.nan
 
 
-def _layers_l2(group: h5py.Group | None) -> float:
-    if group is None:
+def _difference_l2(
+    submitted: h5py.Group | None,
+    pre_attack: h5py.Group | None,
+) -> float:
+    if submitted is None or pre_attack is None:
+        return math.nan
+    submitted_names = sorted(submitted.keys())
+    pre_attack_names = sorted(pre_attack.keys())
+    if submitted_names != pre_attack_names:
         return math.nan
     squared = 0.0
     found = False
-    for dataset in group.values():
-        array = np.asarray(dataset, dtype=np.float64)
-        squared += float(np.square(array).sum())
+    for name in submitted_names:
+        submitted_array = np.asarray(submitted[name], dtype=np.float64)
+        pre_attack_array = np.asarray(pre_attack[name], dtype=np.float64)
+        if submitted_array.shape != pre_attack_array.shape:
+            return math.nan
+        squared += float(np.square(submitted_array - pre_attack_array).sum())
         found = True
     return float(math.sqrt(squared)) if found else math.nan
 
@@ -177,7 +187,10 @@ def read_compact_run(run: RunSpec) -> tuple[list[dict[str, object]], list[dict[s
                 float(update_row["benign_l2_mean"]),
             )
             update_row["malicious_transform_l2_mean"] = _mean(
-                _layers_l2(client.get("pre_attack_update"))
+                _difference_l2(
+                    client.get("submitted_update"),
+                    client.get("pre_attack_update"),
+                )
                 for client in malicious
                 if "pre_attack_update" in client
             )
