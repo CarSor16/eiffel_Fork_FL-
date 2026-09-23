@@ -242,7 +242,7 @@ try {
 
     if ($Smoke) {
         Write-Host "Running synthetic client integration smoke test..."
-        & $Python -m pytest -q -s "eiffel\core\tests\synthetic_client_integration_test.py"
+        & $Python -m pytest -q -s "eiffel\core\tests\synthetic_client_integration_test.py" "eiffel\core\tests\synthetic_flower_integration_test.py"
         if ($LASTEXITCODE -ne 0) {
             throw "Synthetic client smoke test failed."
         }
