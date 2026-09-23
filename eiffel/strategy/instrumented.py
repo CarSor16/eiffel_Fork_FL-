@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any, Mapping
 
 import numpy as np
 from flwr.common import (
+    EvaluateRes,
     FitRes,
     Parameters,
     ndarrays_to_parameters,
@@ -74,16 +76,43 @@ class InstrumentedFedAvg(FedAvg):
             self.store.save_global(0, self._global_weights)
 
     @staticmethod
-    def _extract_inference(metrics: dict) -> tuple[np.ndarray | None, np.ndarray | None]:
+    def _extract_inference(
+        metrics: dict,
+    ) -> tuple[np.ndarray | None, np.ndarray | None, list[str] | None]:
         inference = None
         labels = None
+        families = None
         payload = metrics.pop("_eiffel_inference", None)
         if isinstance(payload, str):
             inference = decode_array(payload)
         payload = metrics.pop("_eiffel_probe_labels", None)
         if isinstance(payload, str):
             labels = decode_array(payload)
-        return inference, labels
+        payload = metrics.pop("_eiffel_probe_families", None)
+        if isinstance(payload, str):
+            try:
+                decoded = json.loads(payload)
+                if isinstance(decoded, list):
+                    families = [str(v) for v in decoded]
+            except json.JSONDecodeError:
+                logger.warning("Unable to decode probe attack-family metadata.")
+        return inference, labels, families
+
+    @staticmethod
+    def _decode_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
+        """Decode Eiffel's JSON-valued Flower metrics without mutating the input."""
+        decoded: dict[str, Any] = {}
+        for key, value in metrics.items():
+            if str(key).startswith("_eiffel_") or key == "_cid":
+                continue
+            if isinstance(value, str):
+                try:
+                    decoded[str(key)] = json.loads(value)
+                    continue
+                except json.JSONDecodeError:
+                    pass
+            decoded[str(key)] = value
+        return decoded
 
     def aggregate_fit(self, server_round, results, failures):
         if not results:
@@ -100,6 +129,7 @@ class InstrumentedFedAvg(FedAvg):
         local_weights: list[list[np.ndarray]] = []
         inferences: list[np.ndarray | None] = []
         probe_labels: list[np.ndarray | None] = []
+        probe_families: list[list[str] | None] = []
 
         for client, fit_res in results:
             clients.append(client)
@@ -107,9 +137,10 @@ class InstrumentedFedAvg(FedAvg):
             local_weights.append(
                 [np.asarray(x, dtype=np.float32) for x in parameters_to_ndarrays(fit_res.parameters)]
             )
-            inf, labels = self._extract_inference(fit_res.metrics)
+            inf, labels, families = self._extract_inference(fit_res.metrics)
             inferences.append(inf)
             probe_labels.append(labels)
+            probe_families.append(families)
 
         pre_updates = [
             [local - global_ for local, global_ in zip(weights, self._global_weights)]
@@ -153,6 +184,21 @@ class InstrumentedFedAvg(FedAvg):
                 attack_active=bool(changed),
                 mechanism=mechanism if changed else "none",
             )
+            self.store.save_client_metrics(
+                int(server_round),
+                str(client.cid),
+                self._decode_metrics(fit_results[idx].metrics),
+                phase="fit",
+            )
+            if probe_families[idx]:
+                self.store.save_probe_families(probe_families[idx] or [])
+
+        self.store.save_round_metadata(
+            int(server_round),
+            attack_mechanism=mechanism,
+            attack_multiplier=float(schedule_multiplier),
+            malicious_clients=int(sum(malicious_mask)),
+        )
 
         aggregated, metrics = super().aggregate_fit(server_round, results, failures)
         if aggregated is not None:
@@ -164,3 +210,21 @@ class InstrumentedFedAvg(FedAvg):
 
         self.store.mark_round_complete(int(server_round))
         return aggregated, metrics
+
+    def aggregate_evaluate(
+        self,
+        server_round: int,
+        results: list[tuple[ClientProxy, EvaluateRes]],
+        failures,
+    ):
+        """Persist distributed evaluation metrics before normal FedAvg aggregation."""
+        for client, evaluate_res in results:
+            self.store.save_client_metrics(
+                int(server_round),
+                str(client.cid),
+                self._decode_metrics(evaluate_res.metrics),
+                phase="evaluate",
+            )
+        if results and self.store.flush_each_round:
+            self.store.flush()
+        return super().aggregate_evaluate(server_round, results, failures)
