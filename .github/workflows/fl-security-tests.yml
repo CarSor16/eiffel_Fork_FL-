@@ -43,6 +43,7 @@ jobs:
           eiffel/core/tests/multiclass_models_test.py
           eiffel/core/tests/round_store_test.py
           eiffel/core/tests/compare_metrics_test.py
+          eiffel/core/tests/compact_round_analysis_test.py
           eiffel/core/tests/plot_callback_test.py
           eiffel/core/tests/toml_runner_test.py
           eiffel/core/tests/synthetic_stress_test.py
