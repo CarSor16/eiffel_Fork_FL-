@@ -27,6 +27,7 @@ central_shift_std: 0.10
 outlier_fraction: 0.012
 dirichlet_alpha: 0.5
 partition_mode: dirichlet
+task: binary
 
 key: synthetic_stress_50k
 _default_target: [Botnet]
