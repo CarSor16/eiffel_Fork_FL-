@@ -29,8 +29,11 @@ jobs:
           python -m pip install -e .
           python -m pip install "pytest>=7.3,<8"
 
-      - name: Synthetic client smoke test
-        run: python -m pytest -q -s eiffel/core/tests/synthetic_client_integration_test.py
+      - name: Synthetic client and Flower smoke tests
+        run: >
+          python -m pytest -q -s
+          eiffel/core/tests/synthetic_client_integration_test.py
+          eiffel/core/tests/synthetic_flower_integration_test.py
 
       - name: Focused FL-security suite
         run: >
