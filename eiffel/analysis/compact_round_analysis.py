@@ -238,6 +238,22 @@ def _shade_attack(ax, rows: Sequence[dict[str, object]]) -> None:
         labelled = True
 
 
+def _annotate_active_clients(ax, rows: Sequence[dict[str, object]]) -> None:
+    for row in rows:
+        active = int(row.get("active_malicious_clients", 0))
+        if active <= 0:
+            continue
+        ax.text(
+            int(row["round"]),
+            0.02,
+            f"M={active}",
+            transform=ax.get_xaxis_transform(),
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+
+
 def _plot_performance(
     rows: Sequence[dict[str, object]],
     output: Path,
@@ -265,6 +281,7 @@ def _plot_performance(
         return
 
     _shade_attack(ax, rows)
+    _annotate_active_clients(ax, rows)
     ax.set_xlabel("Communication round")
     ax.set_ylabel("Score")
     ax.set_ylim(0.0, 1.05)
@@ -306,6 +323,7 @@ def _plot_updates(
         )
 
     _shade_attack(ax, rows)
+    _annotate_active_clients(ax, rows)
     ax.set_xlabel("Communication round")
     ax.set_ylabel("Mean submitted-update L2 norm")
     ax.set_title(_context_title(rows, label) + "\nUpdate magnitude by round")
