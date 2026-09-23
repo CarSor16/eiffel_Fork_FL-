@@ -1056,9 +1056,11 @@ Custom input/output roots can be selected with:
 
 The analysis reads the metrics already persisted in round_state.h5; training does not
 need to be repeated. It produces CSV tables plus line plots for each metric across
-communication rounds, a grouped bar plot comparing final-round metrics across attacks,
-a final-metric delta plot relative to clean, final per-family recall comparisons, and
-per-family recall deltas relative to clean.
+communication rounds, per-round attack deltas relative to the clean baseline, a grouped
+bar plot comparing final-round metrics across attacks, a final-metric delta plot
+relative to clean, final per-family recall comparisons, and per-family recall deltas
+relative to clean. The per-round delta plots are especially useful for late, gradual
+and on/off attacks because they show when degradation begins and how it evolves.
 
 When several runs have the same inferred attack label, for example different seeds,
 round trends and final attack comparisons aggregate them; final bars include standard
