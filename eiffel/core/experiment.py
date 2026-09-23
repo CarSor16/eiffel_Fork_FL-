@@ -259,30 +259,44 @@ class Experiment:
 
         ray.init(**init_kwargs)
 
-        for pool in self.pools:
-            pool.deploy()
+        try:
+            for pool in self.pools:
+                pool.deploy()
 
-        mappings = reduce(lambda a, b: a | b, [p.gen_mappings() for p in self.pools])
+            mappings = reduce(lambda a, b: a | b, [p.gen_mappings() for p in self.pools])
 
-        fn = functools.partial(
-            mk_client,
-            mappings=mappings,
-            seed=self.seed,
-        )
+            fn = functools.partial(
+                mk_client,
+                mappings=mappings,
+                seed=self.seed,
+            )
 
-        self.hist = start_simulation(
-            client_fn=fn,
-            num_clients=self.n_clients,
-            config=ServerConfig(num_rounds=self.n_rounds),
-            strategy=self.strategy,
-            client_resources=compute_client_resources(self.n_clients),
-            actor_kwargs={"on_actor_init_fn": mk_client_init_fn(seed=self.seed)},
-            clients_ids=reduce(lambda a, b: a + b, [p.ids for p in self.pools]),
-            server=self.server,
-            keep_initialised=True,
-        )
+            self.hist = start_simulation(
+                client_fn=fn,
+                num_clients=self.n_clients,
+                config=ServerConfig(num_rounds=self.n_rounds),
+                strategy=self.strategy,
+                client_resources=compute_client_resources(self.n_clients),
+                actor_kwargs={"on_actor_init_fn": mk_client_init_fn(seed=self.seed)},
+                clients_ids=reduce(lambda a, b: a + b, [p.ids for p in self.pools]),
+                server=self.server,
+                keep_initialised=True,
+            )
 
-        ray.shutdown()
+            if not self.hist.metrics_distributed_fit:
+                raise RuntimeError(
+                    "Flower completed without any distributed fit metrics. "
+                    "This indicates that no client fit result reached aggregation; "
+                    "inspect the client failure printed above."
+                )
+        finally:
+            store = getattr(self.strategy, "store", None)
+            if store is not None:
+                try:
+                    store.close()
+                except Exception:
+                    logger.exception("Failed to close round-state storage cleanly.")
+            ray.shutdown()
 
     @property
     def results(self) -> Results:
