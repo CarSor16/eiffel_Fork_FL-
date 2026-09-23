@@ -112,11 +112,32 @@ def parse_run_arg(value: str) -> RunSpec:
     return RunSpec(label.strip(), Path(raw_path).expanduser().resolve())
 
 
+def _maybe_decode_json(value: object) -> object:
+    """Recursively decode historical JSON strings emitted by Flower/Eiffel."""
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped and stripped[0] in "[{":
+            try:
+                return _maybe_decode_json(json.loads(stripped))
+            except json.JSONDecodeError:
+                return value
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _maybe_decode_json(nested)
+            for key, nested in value.items()
+        }
+    if isinstance(value, list):
+        return [_maybe_decode_json(item) for item in value]
+    return value
+
+
 def _flatten_numeric_metrics(
     metrics: Mapping[str, object], prefix: str = ""
 ) -> dict[str, float]:
     flat: dict[str, float] = {}
-    for key, value in metrics.items():
+    for key, raw_value in metrics.items():
+        value = _maybe_decode_json(raw_value)
         full_key = f"{prefix}.{key}" if prefix else str(key)
         if isinstance(value, Mapping):
             flat.update(_flatten_numeric_metrics(value, full_key))
@@ -125,6 +146,81 @@ def _flatten_numeric_metrics(
             if math.isfinite(numeric):
                 flat[full_key] = numeric
     return flat
+
+
+def _as_round(value: object) -> int | None:
+    try:
+        round_number = int(str(value))
+    except (TypeError, ValueError):
+        return None
+    return round_number if round_number >= 0 else None
+
+
+def _looks_like_metric_scope(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    decoded = _flatten_numeric_metrics(value)
+    return any(
+        key in decoded or f"global.{key}" in decoded
+        for key in DEFAULT_METRICS
+    )
+
+
+def _iter_json_round_metrics(
+    payload: Mapping[str, object],
+) -> list[tuple[int, Mapping[str, object]]]:
+    """Normalize known Eiffel/Flower result JSON layouts.
+
+    Supports client->round->metrics, round->client->metrics, optional
+    fit/distributed wrappers, and JSON-string encoded nested metric dictionaries.
+    """
+    payload = _maybe_decode_json(payload)
+    if not isinstance(payload, Mapping):
+        return []
+
+    for wrapper in ("distributed", "fit", "metrics"):
+        nested = payload.get(wrapper)
+        if isinstance(nested, Mapping):
+            wrapped = _iter_json_round_metrics(nested)
+            if wrapped:
+                return wrapped
+
+    records: list[tuple[int, Mapping[str, object]]] = []
+
+    # Layout A: client_id -> round -> metrics
+    for client_value in payload.values():
+        client_value = _maybe_decode_json(client_value)
+        if not isinstance(client_value, Mapping):
+            continue
+        for round_key, metrics_value in client_value.items():
+            round_number = _as_round(round_key)
+            metrics_value = _maybe_decode_json(metrics_value)
+            if (
+                round_number is not None
+                and isinstance(metrics_value, Mapping)
+                and _looks_like_metric_scope(metrics_value)
+            ):
+                records.append((round_number, metrics_value))
+    if records:
+        return records
+
+    # Layout B: round -> client_id -> metrics, or round -> metrics.
+    for round_key, round_value in payload.items():
+        round_number = _as_round(round_key)
+        round_value = _maybe_decode_json(round_value)
+        if round_number is None or not isinstance(round_value, Mapping):
+            continue
+        if _looks_like_metric_scope(round_value):
+            records.append((round_number, round_value))
+            continue
+        for metrics_value in round_value.values():
+            metrics_value = _maybe_decode_json(metrics_value)
+            if (
+                isinstance(metrics_value, Mapping)
+                and _looks_like_metric_scope(metrics_value)
+            ):
+                records.append((round_number, metrics_value))
+    return records
 
 
 def _load_json_phase(run: RunSpec, phase: str) -> dict[str, object]:
@@ -142,6 +238,7 @@ def _load_json_phase(run: RunSpec, phase: str) -> dict[str, object]:
             decoded = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        decoded = _maybe_decode_json(decoded)
         if isinstance(decoded, dict) and decoded:
             return decoded
     return {}
@@ -157,22 +254,13 @@ def _read_json_run_metrics(
     grouped: dict[int, dict[str, list[float]]] = defaultdict(
         lambda: {metric: [] for metric in metrics}
     )
-    for rounds in payload.values():
-        if not isinstance(rounds, Mapping):
-            continue
-        for round_key, nested_metrics in rounds.items():
-            try:
-                round_number = int(round_key)
-            except (TypeError, ValueError):
-                continue
-            if not isinstance(nested_metrics, Mapping):
-                continue
-            decoded = _flatten_numeric_metrics(nested_metrics)
-            for metric in metrics:
-                for key in _metric_candidates(metric):
-                    if key in decoded:
-                        grouped[round_number][metric].append(decoded[key])
-                        break
+    for round_number, nested_metrics in _iter_json_round_metrics(payload):
+        decoded = _flatten_numeric_metrics(nested_metrics)
+        for metric in metrics:
+            for key in _metric_candidates(metric):
+                if key in decoded:
+                    grouped[round_number][metric].append(decoded[key])
+                    break
 
     rows: list[dict[str, object]] = []
     for round_number in sorted(grouped):
@@ -195,27 +283,18 @@ def _read_json_per_family(run: RunSpec, phase: str) -> list[dict[str, object]]:
         return []
 
     grouped: dict[tuple[int, str, str], list[float]] = defaultdict(list)
-    for rounds in payload.values():
-        if not isinstance(rounds, Mapping):
-            continue
-        for round_key, nested_metrics in rounds.items():
-            try:
-                round_number = int(round_key)
-            except (TypeError, ValueError):
+    for round_number, nested_metrics in _iter_json_round_metrics(payload):
+        decoded = _flatten_numeric_metrics(nested_metrics)
+        for key, value in decoded.items():
+            if "." not in key:
                 continue
-            if not isinstance(nested_metrics, Mapping):
+            family, metric = key.rsplit(".", 1)
+            if (
+                family in {"global", "Benign", "fit"}
+                or metric not in {"precision", "recall", "f1", "missrate"}
+            ):
                 continue
-            decoded = _flatten_numeric_metrics(nested_metrics)
-            for key, value in decoded.items():
-                if "." not in key:
-                    continue
-                family, metric = key.rsplit(".", 1)
-                if (
-                    family in {"global", "Benign", "fit"}
-                    or metric not in {"precision", "recall", "f1", "missrate"}
-                ):
-                    continue
-                grouped[(round_number, family, metric)].append(value)
+            grouped[(round_number, family, metric)].append(value)
 
     rows: list[dict[str, object]] = []
     for (round_number, family, metric), observed in sorted(grouped.items()):
@@ -230,6 +309,51 @@ def _read_json_per_family(run: RunSpec, phase: str) -> list[dict[str, object]]:
             }
         )
     return rows
+
+
+def _run_metric_diagnostics(run: RunSpec) -> list[str]:
+    """Return compact diagnostics for an unusable run."""
+    diagnostics: list[str] = []
+    try:
+        with h5py.File(run.path, "r") as h5:
+            client_rounds = h5.get("clients")
+            round_count = len(client_rounds.keys()) if client_rounds is not None else 0
+            metric_groups = 0
+            if client_rounds is not None:
+                for round_group in client_rounds.values():
+                    for client in round_group.values():
+                        if "metrics" in client:
+                            metric_groups += 1
+            diagnostics.append(
+                f"HDF5 client_rounds={round_count}, clients_with_metrics={metric_groups}"
+            )
+    except OSError as exc:
+        diagnostics.append(f"HDF5 unreadable: {exc}")
+
+    for filename in ("distributed.json", "fit.json"):
+        path = run.path.parent / filename
+        if not path.exists():
+            diagnostics.append(f"{filename}=missing")
+            continue
+        size = path.stat().st_size
+        try:
+            decoded = json.loads(path.read_text(encoding="utf-8"))
+            decoded = _maybe_decode_json(decoded)
+        except (OSError, json.JSONDecodeError) as exc:
+            diagnostics.append(f"{filename}={size}B malformed ({exc})")
+            continue
+        if isinstance(decoded, Mapping):
+            keys = list(decoded.keys())
+            records = _iter_json_round_metrics(decoded)
+            diagnostics.append(
+                f"{filename}={size}B top_keys={keys[:4]!r} "
+                f"metric_records={len(records)}"
+            )
+        else:
+            diagnostics.append(
+                f"{filename}={size}B root_type={type(decoded).__name__}"
+            )
+    return diagnostics
 
 
 def _read_phase_metrics(client: h5py.Group, phase: str) -> dict[str, float]:
@@ -806,11 +930,14 @@ def analyse(
 
     if skipped:
         print(
-            "Skipped runs without usable metrics (neither HDF5 metrics nor "
-            "distributed.json/fit.json):"
+            "Skipped runs without usable metrics after checking HDF5, "
+            "distributed.json and fit.json:"
         )
+        by_path = {run.path: run for run in run_list}
         for path in skipped:
             print(f"  - {path}")
+            for detail in _run_metric_diagnostics(by_path[path]):
+                print(f"      {detail}")
 
     if not rows:
         raise ValueError(
