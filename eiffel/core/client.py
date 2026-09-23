@@ -388,8 +388,13 @@ def mk_client(
     cid: EiffelCID,
     mappings: dict[EiffelCID, tuple[ray.ObjectRef, Optional[PoisonIns], keras.Model]],
     seed: int,
-) -> Client:
-    """Return a client based on its CID."""
+) -> NumPyClient:
+    """Return a Flower 1.5-compatible NumPyClient based on its CID.
+
+    Flower's simulation layer accepts a ClientLike and wraps NumPyClient instances
+    internally.  Eiffel pins Flower 1.5.0, where NumPyClient does not expose the
+    newer instance method `to_client()`.
+    """
     if cid not in mappings:
         raise ValueError(f"Client `{cid}` not found in mappings.")
 
@@ -401,7 +406,7 @@ def mk_client(
         model_fn(ray.get(handle.get.remote("train")).X.shape[1]),
         seed=seed,
         poison_ins=attack,
-    ).to_client()
+    )
 
 
 def mean_absolute_error(x_orig: pd.DataFrame, x_pred: pd.DataFrame) -> np.ndarray:
