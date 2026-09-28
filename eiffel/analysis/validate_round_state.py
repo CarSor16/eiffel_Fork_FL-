@@ -15,6 +15,60 @@ def _layers(group: h5py.Group) -> list[np.ndarray]:
     return [np.asarray(group[name]) for name in sorted(group.keys())]
 
 
+def _validate_inference_group(
+    errors: list[str],
+    prefix: str,
+    group: h5py.Group,
+) -> None:
+    probabilities_ds = group.get("probabilities")
+    if probabilities_ds is None:
+        probabilities_ds = group.get("inference")
+    if probabilities_ds is None:
+        return
+
+    probabilities = np.asarray(probabilities_ds)
+    if probabilities.dtype != np.float16:
+        errors.append(
+            f"{prefix}: probabilities dtype {probabilities.dtype} != float16"
+        )
+    if not np.all(np.isfinite(probabilities)):
+        errors.append(f"{prefix}: probabilities contain NaN/inf")
+        return
+    if np.any(probabilities < -1e-3) or np.any(probabilities > 1.001):
+        errors.append(f"{prefix}: probabilities fall outside [0, 1]")
+
+    logits_ds = group.get("logits")
+    if logits_ds is None:
+        return
+    logits = np.asarray(logits_ds)
+    if logits.dtype != np.float16:
+        errors.append(f"{prefix}: logits dtype {logits.dtype} != float16")
+    if logits.shape != probabilities.shape:
+        errors.append(
+            f"{prefix}: logits shape {logits.shape} != probabilities "
+            f"{probabilities.shape}"
+        )
+        return
+    if not np.all(np.isfinite(logits)):
+        errors.append(f"{prefix}: logits contain NaN/inf")
+        return
+
+    logit_values = logits.astype(np.float32)
+    probability_values = probabilities.astype(np.float32)
+    if logit_values.ndim == 1 or (
+        logit_values.ndim == 2 and logit_values.shape[-1] == 1
+    ):
+        expected = 1.0 / (1.0 + np.exp(-np.clip(logit_values, -30.0, 30.0)))
+    else:
+        shifted = logit_values - np.max(logit_values, axis=-1, keepdims=True)
+        exp_values = np.exp(shifted)
+        expected = exp_values / np.sum(exp_values, axis=-1, keepdims=True)
+    if not np.allclose(expected, probability_values, atol=4e-3, rtol=4e-3):
+        errors.append(
+            f"{prefix}: probabilities are inconsistent with stored logits"
+        )
+
+
 def validate(path: Path) -> list[str]:
     errors: list[str] = []
     with h5py.File(path, "r") as h5:
@@ -127,17 +181,11 @@ def validate(path: Path) -> list[str]:
                         "pre_attack_update"
                     )
 
-                if "inference" in client:
-                    inference = np.asarray(client["inference"])
-                    if inference.dtype != np.float16:
-                        errors.append(
-                            f"{round_name}/{cid}: inference dtype "
-                            f"{inference.dtype} != float16"
-                        )
-                    if not np.all(np.isfinite(inference)):
-                        errors.append(
-                            f"{round_name}/{cid}: inference contains NaN/inf"
-                        )
+                _validate_inference_group(
+                    errors,
+                    f"{round_name}/{cid}",
+                    client,
+                )
 
                 if "audit" in client:
                     for key, value in client["audit"].attrs.items():
@@ -163,12 +211,43 @@ def validate(path: Path) -> list[str]:
                     f"round is {highest}"
                 )
 
-        if "probe" in h5 and "labels" in h5["probe"]:
-            labels = np.asarray(h5["probe"]["labels"])
-            if labels.dtype != np.int16:
-                errors.append(
-                    f"probe labels dtype {labels.dtype} != int16"
-                )
+        if "probe" in h5:
+            probe = h5["probe"]
+            probe_size = None
+            if "features" in probe:
+                features = np.asarray(probe["features"])
+                probe_size = int(features.shape[0]) if features.ndim else 0
+                if features.dtype != np.float32:
+                    errors.append(
+                        f"probe features dtype {features.dtype} != float32"
+                    )
+                if not np.all(np.isfinite(features)):
+                    errors.append("probe features contain NaN/inf")
+            if "labels" in probe:
+                labels = np.asarray(probe["labels"])
+                if labels.dtype != np.int16:
+                    errors.append(
+                        f"probe labels dtype {labels.dtype} != int16"
+                    )
+                if probe_size is not None and labels.shape[0] != probe_size:
+                    errors.append(
+                        "probe labels/features have different sample counts"
+                    )
+            if "families" in probe and probe_size is not None:
+                families = np.asarray(probe["families"])
+                if families.shape[0] != probe_size:
+                    errors.append(
+                        "probe families/features have different sample counts"
+                    )
+
+        if "global_inference" in h5:
+            for round_name, round_group in h5["global_inference"].items():
+                for cid, inference_group in round_group.items():
+                    _validate_inference_group(
+                        errors,
+                        f"global_inference/{round_name}/{cid}",
+                        inference_group,
+                    )
 
     return errors
 
