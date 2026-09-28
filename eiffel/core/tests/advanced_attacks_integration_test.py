@@ -7,6 +7,7 @@ from pathlib import Path
 
 import h5py
 import pytest
+from omegaconf import OmegaConf
 
 from eiffel.toml_runner import build_command
 
@@ -131,6 +132,12 @@ def test_advanced_attack_runs_through_toml_hydra_flower_and_hdf5(
     )
     assert completed.returncode == 0, completed.stdout
 
+    hydra_config = run_dir / ".hydra" / "config.yaml"
+    assert hydra_config.exists(), completed.stdout
+    cfg = OmegaConf.load(hydra_config)
+    assert int(cfg.pools[0].n_benign) == 3, OmegaConf.to_yaml(cfg.pools)
+    assert int(cfg.pools[0].n_malicious) == 1, OmegaConf.to_yaml(cfg.pools)
+
     h5_path = run_dir / "round_state.h5"
     assert h5_path.exists(), completed.stdout
     with h5py.File(h5_path, "r") as h5:
@@ -141,7 +148,21 @@ def test_advanced_attack_runs_through_toml_hydra_flower_and_hdf5(
             for client in clients.values()
             if bool(int(client.attrs.get("malicious", 0)))
         ]
-        assert len(malicious) == 1
+        client_debug = {
+            cid: {
+                "attrs": {
+                    str(key): (
+                        value.item()
+                        if hasattr(value, "item")
+                        else value
+                    )
+                    for key, value in client.attrs.items()
+                },
+                "keys": list(client.keys()),
+            }
+            for cid, client in clients.items()
+        }
+        assert len(malicious) == 1, client_debug
         assert bool(int(malicious[0].attrs.get("attack_active", 0)))
         assert "submitted_update" in malicious[0]
         assert "pre_attack_update" in malicious[0]
