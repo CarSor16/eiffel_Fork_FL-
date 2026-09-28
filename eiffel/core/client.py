@@ -19,7 +19,12 @@ from sklearn.metrics import confusion_matrix, f1_score, matthews_corrcoef, preci
 from tensorflow import keras
 
 from eiffel.datasets.dataset import Dataset, DatasetHandle
-from eiffel.datasets.poisoning import PoisonIns, PoisonTask
+from eiffel.datasets.poisoning import (
+    PoisonIns,
+    PoisonTask,
+    poisoning_fraction_at_round,
+    poisoning_is_configured,
+)
 from eiffel.utils import set_seed
 from eiffel.utils.logging import VerbLevel
 from eiffel.utils.typing import EiffelCID, MetricsDict, NDArray
@@ -349,9 +354,25 @@ class EiffelClient(NumPyClient):
             verbose=0,
         )
 
+        round_number = (
+            int(config["round"]) if "round" in config else None
+        )
+        data_attack = (
+            "label_flip"
+            if poisoning_is_configured(self.poison_ins)
+            else "none"
+        )
+        data_poison_fraction = (
+            poisoning_fraction_at_round(self.poison_ins, round_number)
+            if data_attack != "none" and self.poison_ins is not None
+            else 0.0
+        )
         ret = {
             "_cid": self.cid,
             "_eiffel_malicious": self.is_malicious,
+            "_eiffel_data_attack": data_attack,
+            "_eiffel_data_poison_fraction": float(data_poison_fraction),
+            "_eiffel_data_poison_active": bool(data_poison_fraction > 0.0),
         }
 
         # Capture a compact deterministic probe. Flower metrics only accept scalar
