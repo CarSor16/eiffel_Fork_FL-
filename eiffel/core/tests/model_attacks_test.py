@@ -1,6 +1,7 @@
 """Tests for procedural model poisoning attacks and temporal schedules."""
 
 import numpy as np
+import pytest
 
 from eiffel.attacks.model import apply_round_attack, attack_strength_for_round
 
@@ -247,3 +248,215 @@ def test_schedule_multipliers():
         [strength(gradual, r) for r in (2, 4, 6)],
         [0.2, 0.6, 1.0],
     )
+
+
+
+def _alternate_layout_updates():
+    """Different tensor layout to catch feature/model-shape assumptions."""
+    return [
+        [
+            np.array([[0.20, -0.10], [0.05, 0.30]], dtype=np.float32),
+            np.array([0.02, -0.03], dtype=np.float32),
+        ],
+        [
+            np.array([[0.16, -0.08], [0.08, 0.27]], dtype=np.float32),
+            np.array([0.01, -0.01], dtype=np.float32),
+        ],
+        [
+            np.array([[0.22, -0.13], [0.04, 0.34]], dtype=np.float32),
+            np.array([0.03, -0.04], dtype=np.float32),
+        ],
+        [
+            np.array([[0.60, 0.55], [-0.40, -0.30]], dtype=np.float32),
+            np.array([0.30, 0.20], dtype=np.float32),
+        ],
+        [
+            np.array([[0.50, 0.45], [-0.35, -0.20]], dtype=np.float32),
+            np.array([0.25, 0.15], dtype=np.float32),
+        ],
+    ]
+
+
+@pytest.mark.parametrize("mechanism", ["min_max", "min_sum", "adaptive_stealth"])
+def test_optimized_attacks_are_layout_agnostic_and_modify_only_malicious(mechanism):
+    original = _alternate_layout_updates()
+    config = _cfg(
+        mechanism,
+        direction="sign",
+        search_steps=20,
+        max_lambda=6.0,
+        max_strength=6.0,
+        constraint_margin=1.05,
+        stealth_margin=1.10,
+    )
+    attacked, multiplier = apply_round_attack(
+        original,
+        [False, False, False, True, True],
+        config,
+        server_round=1,
+        total_rounds=5,
+        seed=2026,
+    )
+
+    assert multiplier == 1.0
+    _assert_layout_and_finite(original, attacked)
+    for idx in (0, 1, 2):
+        for before, after in zip(original[idx], attacked[idx]):
+            np.testing.assert_array_equal(after, before)
+
+    # Coordinated optimized attacks submit one common crafted vector.
+    for left, right in zip(attacked[3], attacked[4]):
+        np.testing.assert_allclose(left, right)
+
+
+def test_min_max_and_min_sum_require_enough_benign_reference_updates():
+    original = _updates()
+    for mechanism in ("min_max", "min_sum", "adaptive_stealth"):
+        with pytest.raises(ValueError, match="at least two benign"):
+            apply_round_attack(
+                original,
+                [False, True, True, True],
+                _cfg(mechanism),
+                server_round=1,
+                total_rounds=5,
+                seed=2026,
+            )
+
+
+def test_heterogeneity_aware_mimicry_uses_nearest_benign_neighborhood():
+    original = _alternate_layout_updates()
+    attacked, _ = apply_round_attack(
+        original,
+        [False, False, False, True, True],
+        _cfg(
+            "heterogeneity_aware_mimicry",
+            strength=2.5,
+            neighbors=2,
+            similarity="cosine",
+            mimicry_lambda=0.8,
+        ),
+        server_round=1,
+        total_rounds=5,
+        seed=2026,
+    )
+
+    _assert_layout_and_finite(original, attacked)
+    for idx in (0, 1, 2):
+        for before, after in zip(original[idx], attacked[idx]):
+            np.testing.assert_array_equal(after, before)
+    assert any(
+        not np.array_equal(before, after)
+        for before, after in zip(original[3], attacked[3])
+    )
+
+
+def test_targeted_family_poisoning_uses_configured_metadata_not_hardcoded_family():
+    original = _alternate_layout_updates()
+    families = [
+        ["Normal", "Threat-Z", "Threat-Z", "Other"],
+        ["Normal", "Threat-Z", "Threat-Z", "Other"],
+        ["Normal", "Threat-Z", "Threat-Z", "Other"],
+        ["Normal", "Threat-Z", "Threat-Z", "Other"],
+        ["Normal", "Threat-Z", "Threat-Z", "Other"],
+    ]
+    labels = [np.array([0, 1, 1, 1], dtype=np.int16) for _ in original]
+    inferences = [
+        np.array([[0.1], [0.9], [0.8], [0.7]], dtype=np.float32),
+        np.array([[0.1], [0.85], [0.80], [0.7]], dtype=np.float32),
+        np.array([[0.1], [0.88], [0.82], [0.7]], dtype=np.float32),
+        # Malicious candidate 3 is deliberately worst on the configured family.
+        np.array([[0.1], [0.20], [0.25], [0.7]], dtype=np.float32),
+        np.array([[0.1], [0.65], [0.60], [0.7]], dtype=np.float32),
+    ]
+
+    attacked, _ = apply_round_attack(
+        original,
+        [False, False, False, True, True],
+        _cfg(
+            "targeted_family_poisoning",
+            target_family="Threat-Z",
+            target_amplification=2.0,
+            target_mimicry_lambda=0.1,
+        ),
+        server_round=1,
+        total_rounds=5,
+        seed=2026,
+        probe_inferences=inferences,
+        probe_labels=labels,
+        probe_families=families,
+    )
+
+    _assert_layout_and_finite(original, attacked)
+    for idx in (0, 1, 2):
+        for before, after in zip(original[idx], attacked[idx]):
+            np.testing.assert_array_equal(after, before)
+    for left, right in zip(attacked[3], attacked[4]):
+        np.testing.assert_allclose(left, right)
+    assert any(
+        not np.array_equal(before, after)
+        for before, after in zip(original[3], attacked[3])
+    )
+
+
+def test_targeted_family_poisoning_supports_multiclass_probe_probabilities():
+    original = _alternate_layout_updates()
+    labels = [np.array([0, 2, 2, 1], dtype=np.int16) for _ in original]
+    families = [["Clean-X", "Rare-X", "Rare-X", "Other-X"] for _ in original]
+    inferences = [
+        np.array(
+            [
+                [0.8, 0.1, 0.1],
+                [0.1, 0.2, 0.7],
+                [0.1, 0.2, 0.7],
+                [0.1, 0.8, 0.1],
+            ],
+            dtype=np.float32,
+        )
+        for _ in original
+    ]
+    inferences[3] = inferences[3].copy()
+    inferences[3][1:3, 2] = 0.10
+    inferences[4] = inferences[4].copy()
+    inferences[4][1:3, 2] = 0.50
+
+    attacked, _ = apply_round_attack(
+        original,
+        [False, False, False, True, True],
+        _cfg(
+            "targeted_family_poisoning",
+            target_family="Rare-X",
+            target_amplification=1.5,
+        ),
+        server_round=1,
+        total_rounds=5,
+        seed=7,
+        probe_inferences=inferences,
+        probe_labels=labels,
+        probe_families=families,
+    )
+    _assert_layout_and_finite(original, attacked)
+
+
+def test_targeted_family_poisoning_fails_fast_for_missing_dataset_metadata():
+    original = _alternate_layout_updates()
+    labels = [np.array([0, 1], dtype=np.int16) for _ in original]
+    families = [["Clean-X", "Other-X"] for _ in original]
+    inferences = [
+        np.array([[0.1], [0.8]], dtype=np.float32) for _ in original
+    ]
+
+    with pytest.raises(ValueError, match="Available probe families"):
+        apply_round_attack(
+            original,
+            [False, False, False, True, True],
+            _cfg(
+                "targeted_family_poisoning",
+                target_family="Missing-Family",
+            ),
+            server_round=1,
+            total_rounds=5,
+            seed=7,
+            probe_inferences=inferences,
+            probe_labels=labels,
+            probe_families=families,
+        )
