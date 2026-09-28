@@ -121,3 +121,42 @@ def test_validator_detects_missing_pre_attack_update(tmp_path):
 
     errors = validate(path)
     assert any("pre_attack_update" in error for error in errors)
+
+
+
+def test_global_inference_deduplicates_identical_payloads(tmp_path):
+    path = tmp_path / "dedup.h5"
+    probabilities = np.array([[0.2], [0.8]], dtype=np.float32)
+    logits = np.array([[-1.3862944], [1.3862944]], dtype=np.float32)
+
+    with RoundStore(path) as store:
+        store.save_global_inference(
+            1,
+            "client_0",
+            probabilities=probabilities,
+            logits=logits,
+        )
+        store.save_global_inference(
+            1,
+            "client_1",
+            probabilities=probabilities.copy(),
+            logits=logits.copy(),
+        )
+        store.save_global_inference(
+            1,
+            "client_2",
+            probabilities=np.array([[0.3], [0.7]], dtype=np.float32),
+            logits=np.array([[-0.8472978], [0.8472978]], dtype=np.float32),
+        )
+
+    with h5py.File(path, "r") as h5:
+        round_group = h5["global_inference"]["round_0001"]
+        first = round_group["client_0"]
+        same = round_group["client_1"]
+        different = round_group["client_2"]
+
+        assert first["probabilities"].id == same["probabilities"].id
+        assert first["logits"].id == same["logits"].id
+        assert first["probabilities"].id != different["probabilities"].id
+        assert first["logits"].id != different["logits"].id
+        assert same["inference"].id == same["probabilities"].id
