@@ -18,7 +18,7 @@ param(
     [string]$AnalysisOutput = "analysis-results",
     [string]$ValidateHdf5 = "",
 
-    [ValidateSet("none", "synthetic50k", "multiclass")]
+    [ValidateSet("none", "synthetic50k", "multiclass", "advanced")]
     [string]$Suite = "none",
 
     [Parameter(ValueFromRemainingArguments=$true)]
@@ -29,7 +29,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProfilesDir = Join-Path $Root "experiments\toml"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
-$LauncherVersion = "2026-09-23-compact-analysis-1"
+$LauncherVersion = "2026-09-28-advanced-attacks-1"
 
 function Get-Profiles {
     if (-not (Test-Path $ProfilesDir)) {
@@ -126,6 +126,27 @@ function Show-AttackHelp {
     Write-Host "Colluding Sign Flip (coordinated model poisoning)"
     Write-Host "  Malicious clients submit a common transformed malicious centroid."
     Write-Host "  TOML: strength, malicious_fraction, schedule."
+    Write-Host ""
+    Write-Host "Min-Max (optimization-inspired stealth poisoning)"
+    Write-Host "  Maximizes deviation while staying inside benign pairwise-distance bounds."
+    Write-Host "  TOML: [attack.min_max] direction, search_steps, max_lambda, constraint_margin."
+    Write-Host ""
+    Write-Host "Min-Sum (optimization-inspired stealth poisoning)"
+    Write-Host "  Maximizes deviation while constraining summed distance to benign updates."
+    Write-Host "  TOML: [attack.min_sum] direction, search_steps, max_lambda, constraint_margin."
+    Write-Host ""
+    Write-Host "Adaptive Stealth"
+    Write-Host "  Searches the strongest update that remains inside same-round benign quantiles."
+    Write-Host "  TOML: [attack.adaptive] L2/distance/cosine quantiles, max_strength."
+    Write-Host ""
+    Write-Host "Heterogeneity-Aware Mimicry"
+    Write-Host "  Mimics each malicious client's nearest benign neighborhood under non-IID data."
+    Write-Host "  TOML: [attack.heterogeneity] neighbors, similarity, mimicry_lambda."
+    Write-Host ""
+    Write-Host "Targeted Family Poisoning"
+    Write-Host "  Uses generic probe metadata to amplify a malicious direction harming a configured family."
+    Write-Host "  TOML: [attack.targeted] target_family, target_amplification, target_mimicry_lambda."
+    Write-Host "  Dataset-portable: change target_family to a family exposed by the selected dataset."
     Write-Host ""
     Write-Host "Temporal schedules"
     Write-Host "  continuous | late | window | on_off | gradual"
@@ -229,7 +250,12 @@ try {
             "synthetic_50k_quick_clean",
             "synthetic_50k_quick_sign_flip",
             "synthetic_50k_quick_multiclass_clean",
-            "synthetic_50k_quick_multiclass_sign_flip"
+            "synthetic_50k_quick_multiclass_sign_flip",
+            "synthetic_50k_min_max",
+            "synthetic_50k_min_sum",
+            "synthetic_50k_adaptive_stealth",
+            "synthetic_50k_heterogeneity_aware_mimicry",
+            "synthetic_50k_targeted_family_poisoning"
         )) {
             Write-Host ""
             Write-Host "Checking TOML -> Hydra translation: $DoctorName"
@@ -262,7 +288,8 @@ try {
             "eiffel\core\tests\plot_callback_test.py",
             "eiffel\core\tests\toml_runner_test.py",
             "eiffel\core\tests\synthetic_stress_test.py",
-            "eiffel\core\tests\synthetic_client_integration_test.py"
+            "eiffel\core\tests\synthetic_client_integration_test.py",
+            "eiffel\core\tests\advanced_attacks_integration_test.py"
         )
         & $Python -m pytest @TestFiles
         if ($LASTEXITCODE -ne 0) {
@@ -316,6 +343,21 @@ try {
             "synthetic_50k_lie",
             "synthetic_50k_gradient_mimicry",
             "synthetic_50k_colluding_sign_flip"
+        )
+        foreach ($Name in $Names) {
+            Invoke-Profile (Resolve-Profile $Name) -ValidateOnly:$DryRun
+        }
+        exit 0
+    }
+
+    if ($Suite -eq "advanced") {
+        $Names = @(
+            "synthetic_50k_min_max",
+            "synthetic_50k_min_sum",
+            "synthetic_50k_adaptive_stealth",
+            "synthetic_50k_adaptive_stealth_gradual",
+            "synthetic_50k_heterogeneity_aware_mimicry",
+            "synthetic_50k_targeted_family_poisoning"
         )
         foreach ($Name in $Names) {
             Invoke-Profile (Resolve-Profile $Name) -ValidateOnly:$DryRun
