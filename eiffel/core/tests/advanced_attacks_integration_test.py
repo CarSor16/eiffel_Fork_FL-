@@ -290,6 +290,12 @@ def test_label_flip_schedule_is_persisted_end_to_end(tmp_path: Path):
             assert float(attacker.attrs["data_poison_fraction"]) == pytest.approx(
                 expected_fraction
             )
+            if expected_active:
+                assert float(
+                    attacker.attrs["data_poison_effective_fraction"]
+                ) == pytest.approx(0.5)
+            else:
+                assert "data_poison_effective_fraction" not in attacker.attrs
             assert "submitted_update" in attacker
             assert "pre_attack_update" not in attacker
 
