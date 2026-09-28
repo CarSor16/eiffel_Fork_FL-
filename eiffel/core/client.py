@@ -30,6 +30,61 @@ from .pool import Pool
 logger = logging.getLogger(__name__)
 
 
+def predict_probabilities_and_logits(
+    model: keras.Model,
+    x: np.ndarray,
+    *,
+    batch_size: int,
+    verbose: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return model probabilities and exact pre-activation logits.
+
+    Eiffel's supported classifiers end in a Dense sigmoid/softmax layer.  Building a
+    small view of the model that exposes that layer's input lets us reconstruct the
+    exact affine pre-activation values without changing training semantics.
+    """
+    if not model.layers:
+        raise ValueError("Inference capture requires a model with at least one layer.")
+    final_layer = model.layers[-1]
+    if not isinstance(final_layer, keras.layers.Dense):
+        raise ValueError(
+            "Inference capture with logits requires the final model layer to be "
+            "keras.layers.Dense."
+        )
+    activation_name = getattr(final_layer.activation, "__name__", "")
+    if activation_name not in {"sigmoid", "softmax"}:
+        raise ValueError(
+            "Inference capture with logits requires a final sigmoid or softmax "
+            f"Dense layer, got activation={activation_name!r}."
+        )
+
+    view = keras.Model(
+        inputs=model.inputs,
+        outputs=[final_layer.input, model.output],
+    )
+    hidden, probabilities = view.predict(
+        x,
+        batch_size=int(batch_size),
+        verbose=verbose,
+    )
+    weights = final_layer.get_weights()
+    if not weights:
+        raise ValueError("Final Dense layer has no weights; cannot reconstruct logits.")
+    kernel = np.asarray(weights[0], dtype=np.float32)
+    logits = np.matmul(np.asarray(hidden, dtype=np.float32), kernel)
+    if len(weights) > 1:
+        logits = logits + np.asarray(weights[1], dtype=np.float32)
+
+    probabilities = np.asarray(probabilities, dtype=np.float32)
+    logits = np.asarray(logits, dtype=np.float32)
+    if probabilities.shape != logits.shape:
+        raise ValueError(
+            "Probability/logit shape mismatch: "
+            f"{probabilities.shape} != {logits.shape}."
+        )
+    return probabilities, logits
+
+
 def mk_client_init_fn(seed: int) -> Callable[[], None]:
     """Return a client initializer function.
 
@@ -98,6 +153,48 @@ class EiffelClient(NumPyClient):
         self.eval_fit = eval_fit
         set_seed(seed)
 
+    def _capture_probe_payload(
+        self,
+        test_set: Dataset,
+        config: Config,
+    ) -> dict[str, str]:
+        """Encode one deterministic probe for post-hoc analysis."""
+        probe_size = min(int(config.get("probe_size", 256)), len(test_set))
+        if probe_size <= 0:
+            return {}
+
+        probe_x = test_set.X.iloc[:probe_size].to_numpy()
+        probe_y = test_set.y.iloc[:probe_size].to_numpy()
+        probabilities, logits = predict_probabilities_and_logits(
+            self.model,
+            probe_x,
+            batch_size=int(config["batch_size"]),
+            verbose=0,
+        )
+
+        payload: dict[str, str] = {
+            "_eiffel_probabilities": encode_array(
+                probabilities,
+                dtype="float16",
+            ),
+            "_eiffel_probe_labels": encode_array(
+                np.asarray(probe_y),
+                dtype="int16",
+            ),
+        }
+        if bool(config.get("capture_logits", True)):
+            payload["_eiffel_logits"] = encode_array(logits, dtype="float16")
+        if bool(config.get("capture_probe_features", True)):
+            payload["_eiffel_probe_features"] = encode_array(
+                np.asarray(probe_x),
+                dtype="float32",
+            )
+        if "Attack" in test_set.m.columns:
+            payload["_eiffel_probe_families"] = json.dumps(
+                test_set.m["Attack"].iloc[:probe_size].astype(str).tolist()
+            )
+        return payload
+
     def get_parameters(self, config: Config) -> list[NDArray]:
         """Return the current parameters.
 
@@ -156,30 +253,11 @@ class EiffelClient(NumPyClient):
             "_cid": self.cid,
         }
 
-        # Capture a compact, deterministic first inference for round-level analysis.
-        # The payload is transiently base64 encoded because Flower metrics accept
-        # scalar values; the instrumented strategy decodes it and stores float16 HDF5.
+        # Capture a compact deterministic probe. Flower metrics only accept scalar
+        # payloads, so arrays are encoded transiently and decoded by the strategy.
         if bool(config.get("capture_inference", False)):
             test_set: Dataset = ray.get(self.data_holder.get.remote("test"))
-            probe_size = min(int(config.get("probe_size", 256)), len(test_set))
-            if probe_size > 0:
-                probe_x = test_set.X.iloc[:probe_size].to_numpy()
-                probe_y = test_set.y.iloc[:probe_size].to_numpy()
-                inference = self.model.predict(
-                    probe_x,
-                    batch_size=int(config["batch_size"]),
-                    verbose=0,
-                )
-                ret["_eiffel_inference"] = encode_array(
-                    np.asarray(inference), dtype="float16"
-                )
-                ret["_eiffel_probe_labels"] = encode_array(
-                    np.asarray(probe_y), dtype="int16"
-                )
-                if "Attack" in test_set.m.columns:
-                    ret["_eiffel_probe_families"] = json.dumps(
-                        test_set.m["Attack"].iloc[:probe_size].astype(str).tolist()
-                    )
+            ret.update(self._capture_probe_payload(test_set, config))
 
         if self.eval_fit:
             test_loss, _, metrics = self.evaluate(self.model.get_weights(), config)
@@ -355,7 +433,10 @@ class EiffelClient(NumPyClient):
 
         return_data["_cid"] = self.cid
 
-        return (loss, len(test_set), {k: json.dumps(v) for k, v in return_data.items()})
+        metrics_payload = {k: json.dumps(v) for k, v in return_data.items()}
+        if bool(config.get("capture_inference", False)):
+            metrics_payload.update(self._capture_probe_payload(test_set, config))
+        return (loss, len(test_set), metrics_payload)
 
     def poison(self, task: PoisonTask) -> None:
         """Poison the dataset.
