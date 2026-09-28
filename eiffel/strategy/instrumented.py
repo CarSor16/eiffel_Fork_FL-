@@ -194,6 +194,8 @@ class InstrumentedFedAvg(FedAvg):
         clients: list[ClientProxy] = []
         logical_cids: list[str] = []
         reported_malicious: list[bool | None] = []
+        reported_data_attacks: list[str] = []
+        reported_data_fractions: list[float] = []
         fit_results: list[FitRes] = []
         local_weights: list[list[np.ndarray]] = []
         probabilities: list[np.ndarray | None] = []
@@ -213,6 +215,21 @@ class InstrumentedFedAvg(FedAvg):
                 if isinstance(ground_truth, (bool, int, np.integer))
                 else None
             )
+            data_attack = str(
+                fit_res.metrics.get("_eiffel_data_attack", "none")
+            ).strip().lower()
+            reported_data_attacks.append(data_attack or "none")
+            fraction = fit_res.metrics.get("_eiffel_data_poison_fraction", 0.0)
+            if isinstance(fraction, (bool, int, float, np.integer, np.floating)):
+                fraction_value = float(fraction)
+            else:
+                fraction_value = 0.0
+            if not np.isfinite(fraction_value):
+                raise RuntimeError(
+                    f"Client {logical_cids[-1]} reported non-finite data poisoning "
+                    f"fraction {fraction!r}."
+                )
+            reported_data_fractions.append(fraction_value)
             fit_results.append(fit_res)
             local_weights.append(
                 [np.asarray(x, dtype=np.float32) for x in parameters_to_ndarrays(fit_res.parameters)]
@@ -237,6 +254,33 @@ class InstrumentedFedAvg(FedAvg):
             for cid, reported in zip(logical_cids, reported_malicious)
         ]
 
+        model_mechanism = str(
+            self.attack_cfg.get("mechanism", "none")
+        ).strip().lower()
+        configured_data_attacks = {
+            attack
+            for attack, malicious in zip(
+                reported_data_attacks, malicious_mask
+            )
+            if malicious and attack not in {"", "none"}
+        }
+        if len(configured_data_attacks) > 1:
+            raise RuntimeError(
+                "Clients reported multiple data-poisoning mechanisms in one round: "
+                f"{sorted(configured_data_attacks)}"
+            )
+        data_mechanism = (
+            next(iter(configured_data_attacks))
+            if configured_data_attacks
+            else "none"
+        )
+        if model_mechanism != "none" and data_mechanism != "none":
+            raise RuntimeError(
+                "Simultaneous model poisoning and data poisoning are not yet "
+                "supported as one composite experiment. Configure one mechanism "
+                "at a time so attack attribution remains unambiguous."
+            )
+
         submitted_updates, schedule_multiplier = apply_round_attack(
             pre_updates,
             malicious_mask,
@@ -249,8 +293,31 @@ class InstrumentedFedAvg(FedAvg):
             probe_families=probe_families,
         )
 
-        mechanism = str(self.attack_cfg.get("mechanism", "none"))
-        attack_active = schedule_multiplier > 0.0
+        mechanism = (
+            model_mechanism
+            if model_mechanism != "none"
+            else data_mechanism
+        )
+        model_attack_active = (
+            model_mechanism != "none" and schedule_multiplier > 0.0
+        )
+        data_round_fraction = max(
+            (
+                fraction
+                for fraction, malicious, attack in zip(
+                    reported_data_fractions,
+                    malicious_mask,
+                    reported_data_attacks,
+                )
+                if malicious and attack != "none"
+            ),
+            default=0.0,
+        )
+        round_attack_multiplier = (
+            float(schedule_multiplier)
+            if model_mechanism != "none"
+            else float(data_round_fraction)
+        )
 
         for idx, fit_res in enumerate(fit_results):
             submitted_weights = [
@@ -264,12 +331,25 @@ class InstrumentedFedAvg(FedAvg):
         for idx, client in enumerate(clients):
             malicious = malicious_mask[idx]
             cid = logical_cids[idx]
-            changed = malicious and attack_active and mechanism not in {"none", "label_flip"}
+            model_changed = malicious and model_attack_active
+            data_active = (
+                malicious
+                and reported_data_attacks[idx] != "none"
+                and reported_data_fractions[idx] > 0.0
+            )
+            client_attack_active = bool(model_changed or data_active)
+            client_mechanism = (
+                model_mechanism
+                if model_changed
+                else reported_data_attacks[idx]
+                if data_active
+                else "none"
+            )
             self.store.save_client(
                 int(server_round),
                 cid,
                 submitted_update=submitted_updates[idx],
-                pre_attack_update=pre_updates[idx] if changed else None,
+                pre_attack_update=pre_updates[idx] if model_changed else None,
                 audit=audits[idx],
                 probabilities=probabilities[idx],
                 logits=logits[idx],
@@ -277,8 +357,13 @@ class InstrumentedFedAvg(FedAvg):
                 probe_labels=probe_labels[idx],
                 probe_families=probe_families[idx],
                 malicious=malicious,
-                attack_active=bool(changed),
-                mechanism=mechanism if changed else "none",
+                attack_active=client_attack_active,
+                mechanism=client_mechanism,
+                data_poison_fraction=(
+                    reported_data_fractions[idx]
+                    if malicious and reported_data_attacks[idx] != "none"
+                    else 0.0
+                ),
             )
             self.store.save_client_metrics(
                 int(server_round),
@@ -289,7 +374,7 @@ class InstrumentedFedAvg(FedAvg):
         self.store.save_round_metadata(
             int(server_round),
             attack_mechanism=mechanism,
-            attack_multiplier=float(schedule_multiplier),
+            attack_multiplier=round_attack_multiplier,
             malicious_clients=int(sum(malicious_mask)),
         )
 
