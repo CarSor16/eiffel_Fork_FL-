@@ -196,6 +196,7 @@ class InstrumentedFedAvg(FedAvg):
         reported_malicious: list[bool | None] = []
         reported_data_attacks: list[str] = []
         reported_data_fractions: list[float] = []
+        reported_data_effective_fractions: list[float | None] = []
         reported_data_active: list[bool] = []
         fit_results: list[FitRes] = []
         local_weights: list[list[np.ndarray]] = []
@@ -231,6 +232,28 @@ class InstrumentedFedAvg(FedAvg):
                     f"fraction {fraction!r}."
                 )
             reported_data_fractions.append(fraction_value)
+            effective_value = fit_res.metrics.get(
+                "_eiffel_data_poison_effective_fraction"
+            )
+            if isinstance(
+                effective_value,
+                (bool, int, float, np.integer, np.floating),
+            ):
+                effective_fraction = float(effective_value)
+                if not np.isfinite(effective_fraction):
+                    raise RuntimeError(
+                        f"Client {logical_cids[-1]} reported non-finite effective "
+                        f"data poisoning fraction {effective_value!r}."
+                    )
+                if not 0.0 <= effective_fraction <= 1.0:
+                    raise RuntimeError(
+                        f"Client {logical_cids[-1]} reported effective data poisoning "
+                        f"fraction outside [0, 1]: {effective_fraction}."
+                    )
+                reported_data_effective_fractions.append(effective_fraction)
+            else:
+                reported_data_effective_fractions.append(None)
+
             active_value = fit_res.metrics.get(
                 "_eiffel_data_poison_active",
                 fraction_value > 0.0,
@@ -314,12 +337,13 @@ class InstrumentedFedAvg(FedAvg):
         data_round_fraction = max(
             (
                 fraction
-                for fraction, malicious, attack in zip(
+                for fraction, malicious, attack, active in zip(
                     reported_data_fractions,
                     malicious_mask,
                     reported_data_attacks,
+                    reported_data_active,
                 )
-                if malicious and attack != "none"
+                if malicious and attack != "none" and active
             ),
             default=0.0,
         )
@@ -373,6 +397,11 @@ class InstrumentedFedAvg(FedAvg):
                     reported_data_fractions[idx]
                     if malicious and reported_data_attacks[idx] != "none"
                     else 0.0
+                ),
+                data_poison_effective_fraction=(
+                    reported_data_effective_fractions[idx]
+                    if malicious and reported_data_attacks[idx] != "none"
+                    else None
                 ),
             )
             self.store.save_client_metrics(
