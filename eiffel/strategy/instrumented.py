@@ -196,6 +196,7 @@ class InstrumentedFedAvg(FedAvg):
         reported_malicious: list[bool | None] = []
         reported_data_attacks: list[str] = []
         reported_data_fractions: list[float] = []
+        reported_data_active: list[bool] = []
         fit_results: list[FitRes] = []
         local_weights: list[list[np.ndarray]] = []
         probabilities: list[np.ndarray | None] = []
@@ -230,6 +231,15 @@ class InstrumentedFedAvg(FedAvg):
                     f"fraction {fraction!r}."
                 )
             reported_data_fractions.append(fraction_value)
+            active_value = fit_res.metrics.get(
+                "_eiffel_data_poison_active",
+                fraction_value > 0.0,
+            )
+            reported_data_active.append(
+                bool(active_value)
+                if isinstance(active_value, (bool, int, np.integer))
+                else bool(fraction_value > 0.0)
+            )
             fit_results.append(fit_res)
             local_weights.append(
                 [np.asarray(x, dtype=np.float32) for x in parameters_to_ndarrays(fit_res.parameters)]
@@ -335,7 +345,7 @@ class InstrumentedFedAvg(FedAvg):
             data_active = (
                 malicious
                 and reported_data_attacks[idx] != "none"
-                and reported_data_fractions[idx] > 0.0
+                and reported_data_active[idx]
             )
             client_attack_active = bool(model_changed or data_active)
             client_mechanism = (
