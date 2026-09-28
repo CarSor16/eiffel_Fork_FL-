@@ -1,10 +1,11 @@
 """Tests for explicit probability/logit capture."""
 
 import numpy as np
+import pandas as pd
 import pytest
 from tensorflow import keras
 
-from eiffel.core.client import predict_probabilities_and_logits
+from eiffel.core.client import EiffelClient, predict_probabilities_and_logits
 from eiffel.models.advanced import (
     mk_cnn1d,
     mk_ft_transformer,
@@ -12,6 +13,7 @@ from eiffel.models.advanced import (
     mk_stress_mlp,
 )
 from eiffel.models.supervized import mk_popoola_mlp
+from eiffel.storage import decode_array
 
 
 def test_binary_probabilities_match_sigmoid_of_exact_logits():
@@ -144,3 +146,41 @@ def test_supported_models_expose_consistent_probabilities_and_logits(
             rtol=2e-5,
             atol=2e-5,
         )
+
+
+def test_disabling_logits_allows_non_dense_probability_head():
+    inputs = keras.Input(shape=(2,))
+    dense = keras.layers.Dense(1)(inputs)
+    outputs = keras.layers.Activation("sigmoid")(dense)
+    model = keras.Model(inputs, outputs)
+
+    class Probe:
+        X = pd.DataFrame([[0.1, 0.2], [0.3, 0.4]])
+        y = pd.Series([0, 1])
+        m = pd.DataFrame({"Attack": ["Benign", "Threat-X"]})
+
+        def __len__(self):
+            return len(self.X)
+
+    client = EiffelClient(
+        "probe_benign_0",
+        None,
+        model,
+        seed=2026,
+        eval_fit=False,
+    )
+    payload = client._capture_probe_payload(
+        Probe(),
+        {
+            "batch_size": 2,
+            "probe_size": 2,
+            "capture_logits": False,
+            "capture_probe_features": True,
+        },
+    )
+
+    assert "_eiffel_probabilities" in payload
+    assert "_eiffel_logits" not in payload
+    probabilities = decode_array(payload["_eiffel_probabilities"])
+    assert probabilities.shape == (2, 1)
+    assert np.all((probabilities >= 0.0) & (probabilities <= 1.0))
