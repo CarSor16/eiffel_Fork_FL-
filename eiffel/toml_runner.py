@@ -525,9 +525,19 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
                 "targeted_family_poisoning requires "
                 "[attack.targeted].target_family (or attack.target_family)."
             )
+        if storage.get("enabled", True) is False:
+            raise TomlExperimentError(
+                "targeted_family_poisoning requires storage.enabled=true "
+                "because its probe metadata is transported through the "
+                "instrumented storage path."
+            )
         if storage.get("capture_inference", True) is False:
             raise TomlExperimentError(
                 "targeted_family_poisoning requires storage.capture_inference=true."
+            )
+        if int(storage.get("probe_size", 256)) <= 0:
+            raise TomlExperimentError(
+                "targeted_family_poisoning requires storage.probe_size > 0."
             )
         overrides.append("storage.capture_inference=true")
 
