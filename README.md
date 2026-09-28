@@ -532,11 +532,22 @@ round_state.h5
             submitted_update/
             pre_attack_update/
             audit/
-            inference
+            probabilities
+            logits
+            inference          # backward-compatible alias of probabilities
     ...
 
 /probe/
+    features
     labels
+    families
+    clients/<client_id>/...
+
+/global_inference/
+    round_0001/
+        <client_id>/
+            probabilities
+            logits
 ```
 
 ### Global model state
@@ -618,34 +629,37 @@ Because the raw submitted updates are also preserved, new audit metrics can be c
 
 ## Inference capture
 
-The project also records a compact behavioural view of every locally trained client model.
+The project records a deterministic probe for post-hoc analysis without retraining.
+The probe stores its feature vectors, ground-truth labels and attack-family metadata.
+For every locally trained client model and round, Eiffel stores both:
 
-After local training, the client performs a deterministic inference over a fixed small probe slice.
+- `probabilities`: the sigmoid/softmax output used for confidence, thresholds and metrics;
+- `logits`: the exact Dense pre-activation values before sigmoid/softmax.
 
-The inference output is saved for each client and each round.
+The legacy `inference` HDF5 name remains as a hard-link alias of `probabilities`, so
+older analysis code keeps working without duplicating bytes.
 
-This makes it possible to compare:
+Distributed evaluation runs after Flower has aggregated the round. The same probe payload
+is therefore also stored below `/global_inference/round_x/<client_id>/`, providing the
+behaviour of the **aggregated global model** for every round.
 
-```text
-update-space behaviour
-          +
-model inference behaviour
-```
-
-and later compute metrics such as:
+This makes it possible to compute later, without retraining:
 
 ```text
 prediction disagreement
-confidence
+confidence and calibration
+alternative binary thresholds
 entropy
 class margins
-KL divergence
-JS divergence
-target-class degradation
-round-to-round logit drift
+KL / JS divergence
+target-family degradation
+local-vs-global behaviour
+round-to-round probability/logit drift
 ```
 
-without rerunning training.
+The default common-test setup stores one canonical probe and hard-links identical
+per-client probes. Projects using client-specific test sets automatically retain the
+different probe for each client instead.
 
 ---
 
@@ -656,12 +670,14 @@ The storage format is designed to preserve raw information while keeping experim
 Current choices are:
 
 ```text
-global weights      float32
-submitted updates   float32
-pre-attack updates  float32
-audit metrics       float32
-inference outputs   float16
-probe labels        int16
+global weights          float32
+submitted updates       float32
+pre-attack updates      float32
+audit metrics           float32
+probe features          float32
+probabilities           float16
+logits                  float16
+probe labels            int16
 ```
 
 The HDF5 file uses compression and avoids repeating text labels or creating one file per client per round.
@@ -878,6 +894,9 @@ storage:
   compression_level: 4
   flush_each_round: true
   capture_inference: true
+  capture_logits: true
+  capture_probe_features: true
+  capture_global_inference: true
   probe_size: 256
 ```
 
@@ -1067,7 +1086,8 @@ mapping instead of silently applying the binary operation to labels 0..5.
 Every completed run can be checked for the HDF5 invariants required by the analysis:
 round 0 global weights, previous/current global states, submitted-update shapes and
 float32 dtypes, finite values, malicious/attack flags, pre-attack updates when required,
-float16 inference capture, int16 probe labels and last_complete_round.
+float16 probabilities/logits, float32 probe features, int16 probe labels,
+probability/logit consistency, optional global inference and last_complete_round.
 
     .\run.cmd -ValidateHdf5 "outputs\YYYY-MM-DD\HH-MM-SS\round_state.h5"
 
