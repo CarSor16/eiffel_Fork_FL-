@@ -160,3 +160,51 @@ def test_global_inference_deduplicates_identical_payloads(tmp_path):
         assert first["probabilities"].id != different["probabilities"].id
         assert first["logits"].id != different["logits"].id
         assert same["inference"].id == same["probabilities"].id
+
+def test_validator_checks_effective_label_poisoning_fraction(tmp_path):
+    valid_path = tmp_path / "valid_label_flip.h5"
+    update = [np.array([0.1, -0.1], dtype=np.float32)]
+    weights = [np.array([1.0, -1.0], dtype=np.float32)]
+
+    with RoundStore(valid_path) as store:
+        store.save_global(0, weights)
+        store.save_client(
+            1,
+            "malicious_0",
+            submitted_update=update,
+            malicious=True,
+            attack_active=True,
+            mechanism="label_flip",
+            data_poison_fraction=0.5,
+            data_poison_effective_fraction=0.25,
+        )
+        store.save_round_metadata(
+            1,
+            attack_mechanism="label_flip",
+            attack_multiplier=0.5,
+            malicious_clients=1,
+        )
+        store.save_global(1, weights)
+        store.mark_round_complete(1)
+
+    assert validate(valid_path) == []
+
+    invalid_path = tmp_path / "invalid_label_flip.h5"
+    with RoundStore(invalid_path) as store:
+        store.save_global(0, weights)
+        store.save_client(
+            1,
+            "malicious_0",
+            submitted_update=update,
+            malicious=True,
+            attack_active=True,
+            mechanism="label_flip",
+            data_poison_fraction=0.5,
+            data_poison_effective_fraction=0.0,
+        )
+        store.save_global(1, weights)
+        store.mark_round_complete(1)
+
+    errors = validate(invalid_path)
+    assert any("effective poisoned fraction" in error for error in errors)
+
