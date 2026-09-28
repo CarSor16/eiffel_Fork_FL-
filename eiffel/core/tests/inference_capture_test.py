@@ -5,7 +5,11 @@ import pandas as pd
 import pytest
 from tensorflow import keras
 
-from eiffel.core.client import EiffelClient, predict_probabilities_and_logits
+from eiffel.core.client import (
+    EiffelClient,
+    predict_probabilities_and_logits,
+    select_probe_positions,
+)
 from eiffel.models.advanced import (
     mk_cnn1d,
     mk_ft_transformer,
@@ -184,3 +188,33 @@ def test_disabling_logits_allows_non_dense_probability_head():
     probabilities = decode_array(payload["_eiffel_probabilities"])
     assert probabilities.shape == (2, 1)
     assert np.all((probabilities >= 0.0) & (probabilities <= 1.0))
+
+
+def test_probe_selection_is_deterministic_and_family_stratified():
+    class OrderedProbe:
+        X = pd.DataFrame(
+            np.arange(40, dtype=np.float32).reshape(20, 2)
+        )
+        y = pd.Series([0] * 12 + [1] * 8)
+        m = pd.DataFrame(
+            {
+                "Attack": (
+                    ["Benign"] * 12
+                    + ["DoS"] * 6
+                    + ["Rare-Z"] * 2
+                )
+            }
+        )
+
+        def __len__(self):
+            return len(self.X)
+
+    first = select_probe_positions(OrderedProbe(), 9, seed=2026)
+    second = select_probe_positions(OrderedProbe(), 9, seed=2026)
+
+    np.testing.assert_array_equal(first, second)
+    assert len(first) == 9
+    selected_families = set(
+        OrderedProbe.m["Attack"].iloc[first].astype(str).tolist()
+    )
+    assert selected_families == {"Benign", "DoS", "Rare-Z"}
