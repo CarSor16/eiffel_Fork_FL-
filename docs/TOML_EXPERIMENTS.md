@@ -125,6 +125,28 @@ synthetic_50k_colluding_sign_flip.toml
 The two `quick` profiles keep the full 50k training samples but use only five FL rounds
 for environment validation.
 
+## Post-hoc inference storage
+
+The `[storage]` table can make a completed run reusable for later analysis without
+retraining:
+
+```toml
+[storage]
+enabled = true
+capture_inference = true
+capture_logits = true
+capture_probe_features = true
+capture_global_inference = true
+probe_size = 256
+```
+
+`capture_inference` is the master switch. With the defaults above, `round_state.h5`
+stores the deterministic probe features, labels and family metadata, plus local-model
+probabilities/logits for each round. During Flower distributed evaluation it also
+stores probabilities/logits from the aggregated global model under `global_inference`.
+
+The storage path is dataset-agnostic; the current logit extractor only requires a
+supported Dense sigmoid/softmax classifier head.
 ## Dataset aliases
 
 Current aliases:
@@ -185,6 +207,11 @@ gaussian_noise
 lie
 gradient_mimicry
 colluding_sign_flip
+min_max
+min_sum
+adaptive_stealth
+heterogeneity_aware_mimicry
+targeted_family_poisoning
 ```
 
 `model_scaling` is translated to the internal `scaling` attack name.
