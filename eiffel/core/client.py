@@ -368,12 +368,15 @@ class EiffelClient(NumPyClient):
             else 0.0
         )
         data_poison_active = bool(data_poison_fraction > 0.0)
+        data_poison_effective_fraction: float | None = None
         if data_attack != "none" and "Poisoned" in train_set.m.columns:
             # NF-V2-compatible datasets expose the actual local poisoning state.
             # This matters under non-IID partitions: a targeted attack can be
             # scheduled but have no effect on a client that owns no target samples.
-            data_poison_active = bool(
-                train_set.m["Poisoned"].astype(bool).any()
+            poisoned = train_set.m["Poisoned"].astype(bool).to_numpy()
+            data_poison_active = bool(poisoned.any())
+            data_poison_effective_fraction = (
+                float(poisoned.mean()) if poisoned.size else 0.0
             )
 
         ret = {
@@ -383,6 +386,10 @@ class EiffelClient(NumPyClient):
             "_eiffel_data_poison_fraction": float(data_poison_fraction),
             "_eiffel_data_poison_active": data_poison_active,
         }
+        if data_poison_effective_fraction is not None:
+            ret["_eiffel_data_poison_effective_fraction"] = float(
+                data_poison_effective_fraction
+            )
 
         # Capture a compact deterministic probe. Flower metrics only accept scalar
         # payloads, so arrays are encoded transiently and decoded by the strategy.
