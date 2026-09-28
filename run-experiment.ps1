@@ -291,7 +291,11 @@ try {
             "eiffel\core\tests\toml_runner_test.py",
             "eiffel\core\tests\synthetic_stress_test.py",
             "eiffel\core\tests\synthetic_client_integration_test.py",
-            "eiffel\core\tests\advanced_attacks_integration_test.py"
+            "eiffel\core\tests\advanced_attacks_integration_test.py",
+            "eiffel\datasets\tests\dataset_test.py",
+            "eiffel\datasets\tests\nfv2_test.py",
+            "eiffel\datasets\tests\partitioners_test.py",
+            "eiffel\datasets\tests\poisoning_test.py"
         )
         & $Python -m pytest @TestFiles
         if ($LASTEXITCODE -ne 0) {
