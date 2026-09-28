@@ -479,7 +479,9 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         poison_rate = float(attack.get("poison_rate", 1.0))
         schedule = _schedule_table(attack)
         profile = _label_flip_profile(poison_rate, schedule, rounds=rounds)
-        overrides.append(f"attacks.0.profile={profile}")
+        overrides.append(
+            f"attacks.0.profile={_quote_hydra(profile)}"
+        )
         objective = str(attack.get("objective", "untargeted")).lower()
         target = attack.get("target")
         if objective in {"untargeted", "all"}:
