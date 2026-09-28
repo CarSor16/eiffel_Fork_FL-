@@ -36,7 +36,11 @@ def test_partitioners():
 
     # Test2: NIID partitioner
     pt = NIIDClassPartitioner(
-        n_partitions=10, class_column="Attack", preserved_classes=["Benign"], seed=SEED
+        n_partitions=10,
+        class_column="Attack",
+        preserved_classes=["Benign"],
+        n_drop=1,
+        seed=SEED,
     )
     pt.load(d)
     parts = pt.all()
