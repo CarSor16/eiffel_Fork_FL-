@@ -30,6 +30,75 @@ from .pool import Pool
 logger = logging.getLogger(__name__)
 
 
+def select_probe_positions(
+    test_set: Dataset,
+    probe_size: int,
+    *,
+    seed: int,
+) -> np.ndarray:
+    """Select a deterministic, approximately proportional stratified probe.
+
+    Attack-family metadata is preferred when available so rare NIDS families are not
+    silently omitted merely because a source dataset is ordered by class. Labels are
+    the generic fallback for datasets without an Attack metadata column.
+    """
+    total = len(test_set)
+    size = min(max(0, int(probe_size)), total)
+    if size <= 0:
+        return np.empty(0, dtype=np.int64)
+    if size == total:
+        return np.arange(total, dtype=np.int64)
+
+    if "Attack" in test_set.m.columns:
+        strata = test_set.m["Attack"].astype(str).to_numpy()
+    else:
+        strata = test_set.y.astype(str).to_numpy()
+
+    _, inverse, counts = np.unique(
+        strata,
+        return_inverse=True,
+        return_counts=True,
+    )
+    n_groups = len(counts)
+    quotas = counts.astype(np.float64) * (float(size) / float(total))
+    allocation = np.floor(quotas).astype(int)
+
+    minimum = np.zeros(n_groups, dtype=int)
+    if size >= n_groups:
+        minimum[:] = 1
+        allocation = np.maximum(allocation, minimum)
+    allocation = np.minimum(allocation, counts)
+
+    while int(allocation.sum()) > size:
+        candidates = np.flatnonzero(allocation > minimum)
+        if candidates.size == 0:
+            break
+        over = allocation[candidates] - quotas[candidates]
+        idx = candidates[int(np.argmax(over))]
+        allocation[idx] -= 1
+
+    while int(allocation.sum()) < size:
+        candidates = np.flatnonzero(allocation < counts)
+        if candidates.size == 0:
+            break
+        deficit = quotas[candidates] - allocation[candidates]
+        idx = candidates[int(np.argmax(deficit))]
+        allocation[idx] += 1
+
+    rng = np.random.default_rng(int(seed))
+    selected: list[np.ndarray] = []
+    for group_id, count in enumerate(allocation):
+        if count <= 0:
+            continue
+        positions = np.flatnonzero(inverse == group_id)
+        chosen = rng.choice(positions, size=int(count), replace=False)
+        selected.append(np.asarray(chosen, dtype=np.int64))
+
+    if not selected:
+        return np.empty(0, dtype=np.int64)
+    return np.sort(np.concatenate(selected)).astype(np.int64)
+
+
 def predict_probabilities_and_logits(
     model: keras.Model,
     x: np.ndarray,
@@ -159,12 +228,16 @@ class EiffelClient(NumPyClient):
         config: Config,
     ) -> dict[str, str]:
         """Encode one deterministic probe for post-hoc analysis."""
-        probe_size = min(int(config.get("probe_size", 256)), len(test_set))
-        if probe_size <= 0:
+        positions = select_probe_positions(
+            test_set,
+            int(config.get("probe_size", 256)),
+            seed=self.seed,
+        )
+        if positions.size <= 0:
             return {}
 
-        probe_x = test_set.X.iloc[:probe_size].to_numpy()
-        probe_y = test_set.y.iloc[:probe_size].to_numpy()
+        probe_x = test_set.X.iloc[positions].to_numpy()
+        probe_y = test_set.y.iloc[positions].to_numpy()
         capture_logits = bool(config.get("capture_logits", True))
         if capture_logits:
             probabilities, logits = predict_probabilities_and_logits(
@@ -203,7 +276,7 @@ class EiffelClient(NumPyClient):
             )
         if "Attack" in test_set.m.columns:
             payload["_eiffel_probe_families"] = json.dumps(
-                test_set.m["Attack"].iloc[:probe_size].astype(str).tolist()
+                test_set.m["Attack"].iloc[positions].astype(str).tolist()
             )
         return payload
 
