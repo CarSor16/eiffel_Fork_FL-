@@ -1,5 +1,6 @@
-# Reproducible dependency constraints for the supported Windows/Python 3.10 setup.
-# These pins keep the original Eiffel-era Flower/TensorFlow APIs compatible.
+# Reproducible dependency constraints for the supported Python 3.10 runtime.
+# The same pins are exercised by CI on Windows and Ubuntu and keep the original
+# Eiffel-era Flower/TensorFlow APIs compatible.
 
 tensorflow==2.10.0
 flwr==1.5.0
