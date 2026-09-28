@@ -215,6 +215,16 @@ class Experiment:
                 and bool(storage.get("enabled", True))
                 and bool(storage.get("capture_inference", True))
             )
+            probe_config = {
+                "capture_inference": capture_inference,
+                "capture_logits": bool(storage.get("capture_logits", True))
+                if storage is not None else True,
+                "capture_probe_features": bool(
+                    storage.get("capture_probe_features", True)
+                ) if storage is not None else True,
+                "probe_size": int(storage.get("probe_size", 256))
+                if storage is not None else 256,
+            }
             self.strategy = strategy(
                 min_fit_clients=self.n_clients,
                 min_evaluate_clients=self.n_clients,
@@ -222,14 +232,13 @@ class Experiment:
                 on_fit_config_fn=mk_config_fn({
                     "batch_size": batch_size,
                     "num_epochs": num_epochs,
-                    "capture_inference": capture_inference,
-                    "probe_size": int(storage.get("probe_size", 256))
-                    if storage is not None else 256,
+                    **probe_config,
                 }),
                 evaluate_metrics_aggregation_fn=aggregate_metrics_fn,
                 fit_metrics_aggregation_fn=aggregate_metrics_fn,
                 on_evaluate_config_fn=mk_config_fn(
-                    {"batch_size": batch_size}, stats_when=self.n_rounds
+                    {"batch_size": batch_size, **probe_config},
+                    stats_when=self.n_rounds,
                 ),
                 initial_parameters=get_random_weights(model_fn, datasets[0].X.shape[1]),
             )
