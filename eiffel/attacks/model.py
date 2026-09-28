@@ -307,8 +307,15 @@ def _adaptive_stealth_crafted(
         dtype=np.float64,
     )
 
-    l2_bound = float(np.quantile(benign_l2, l2_q)) * margin
-    distance_bound = float(np.quantile(benign_distance, distance_q)) * margin
+    # Keep the benign centroid itself feasible even for very tight quantiles.
+    l2_bound = max(
+        float(np.quantile(benign_l2, l2_q)) * margin,
+        float(np.linalg.norm(reference)),
+    )
+    distance_bound = max(
+        float(np.quantile(benign_distance, distance_q)) * margin,
+        0.0,
+    )
     cosine_bound = float(np.quantile(benign_cosine, cosine_q)) - cosine_slack
 
     def feasible(vec: np.ndarray) -> bool:
