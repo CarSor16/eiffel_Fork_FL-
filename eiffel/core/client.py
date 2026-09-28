@@ -336,6 +336,7 @@ class EiffelClient(NumPyClient):
 
         ret = {
             "_cid": self.cid,
+            "_eiffel_malicious": bool(self.poison_ins is not None),
         }
 
         # Capture a compact deterministic probe. Flower metrics only accept scalar
