@@ -219,6 +219,15 @@ targeted_family_poisoning
 Pure model-poisoning profiles automatically use Eiffel's clean poisoning profile so
 malicious clients train on unmodified local labels before their updates are transformed.
 
+For `label_flip`, the round-state file distinguishes two fractions. The
+`data_poison_fraction` client attribute is the configured fraction of the selected
+poisoning target, while `data_poison_effective_fraction` is the observed fraction of
+the whole local training shard currently marked poisoned when the dataset exposes
+Eiffel's `Poisoned` metadata. This distinction is important under non-IID targeted
+attacks: a poisoning schedule may be enabled while a specific malicious client owns no
+samples from the target family. Such a client is not counted as attack-active for that
+round.
+
 ## Current limitation
 
 The TOML compatibility layer currently supports `aggregation.name = "fedavg"`.
