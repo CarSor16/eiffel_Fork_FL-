@@ -193,6 +193,7 @@ class InstrumentedFedAvg(FedAvg):
 
         clients: list[ClientProxy] = []
         logical_cids: list[str] = []
+        reported_malicious: list[bool | None] = []
         fit_results: list[FitRes] = []
         local_weights: list[list[np.ndarray]] = []
         probabilities: list[np.ndarray | None] = []
@@ -205,6 +206,12 @@ class InstrumentedFedAvg(FedAvg):
             clients.append(client)
             logical_cids.append(
                 self._logical_cid(fit_res.metrics, str(client.cid))
+            )
+            ground_truth = fit_res.metrics.get("_eiffel_malicious")
+            reported_malicious.append(
+                bool(ground_truth)
+                if isinstance(ground_truth, (bool, int, np.integer))
+                else None
             )
             fit_results.append(fit_res)
             local_weights.append(
@@ -223,7 +230,12 @@ class InstrumentedFedAvg(FedAvg):
             [local - global_ for local, global_ in zip(weights, self._global_weights)]
             for weights in local_weights
         ]
-        malicious_mask = ["malicious" in cid for cid in logical_cids]
+        malicious_mask = [
+            reported
+            if reported is not None
+            else ("malicious" in cid)
+            for cid, reported in zip(logical_cids, reported_malicious)
+        ]
 
         submitted_updates, schedule_multiplier = apply_round_attack(
             pre_updates,
