@@ -403,3 +403,29 @@ def test_targeted_family_requires_nonempty_probe():
                 {"enabled": True, "capture_inference": True, "probe_size": 0}
             )
         )
+
+
+
+def test_label_flip_temporal_selector_is_hydra_quoted():
+    profile = {
+        "experiment": {"num_clients": 4, "rounds": 3},
+        "dataset": {"name": "synthetic_stress", "task": "binary"},
+        "partition": {"type": "iid"},
+        "model": {"name": "stress_mlp"},
+        "attack": {
+            "mechanism": "label_flip",
+            "malicious_fraction": 0.25,
+            "poison_rate": 0.5,
+            "objective": "untargeted",
+            "schedule": {
+                "type": "window",
+                "start_round": 2,
+                "end_round": 2,
+            },
+        },
+        "aggregation": {"name": "fedavg"},
+    }
+
+    overrides = profile_to_overrides(profile)
+
+    assert "attacks.0.profile='0.0+0.5{2}-0.5{3}'" in overrides
