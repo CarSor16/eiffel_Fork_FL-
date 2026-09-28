@@ -189,6 +189,9 @@ class InstrumentedFedAvg(FedAvg):
             server_round=int(server_round),
             total_rounds=self.num_rounds,
             seed=self.seed,
+            probe_inferences=inferences,
+            probe_labels=probe_labels,
+            probe_families=probe_families,
         )
 
         mechanism = str(self.attack_cfg.get("mechanism", "none"))
