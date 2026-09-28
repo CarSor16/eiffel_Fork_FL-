@@ -456,6 +456,9 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
             "compression_level",
             "flush_each_round",
             "capture_inference",
+            "capture_logits",
+            "capture_probe_features",
+            "capture_global_inference",
             "probe_size",
         ):
             if key in storage:
