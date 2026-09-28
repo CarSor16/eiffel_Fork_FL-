@@ -115,7 +115,7 @@ class NFV2Dataset(Dataset):
             The number of samples that have been modified.
         """
         if seed is None:
-            logger.warn(
+            logger.warning(
                 "No seed provided for poisoning. Results will not be reproducible."
             )
 
@@ -166,9 +166,10 @@ class NFV2Dataset(Dataset):
         n = min(n, sum(target))
         idx = d.y[target].sample(n=n, random_state=seed).index.to_list()
 
-        # apply the poisoning operation
-        # cast to int to avoid future deprecation in NumPy
-        d.y.loc[idx] = d.y[idx].apply(lambda x: int(not x))
+        # Apply the label flip while preserving the boolean NF-V2 label dtype.
+        # Assigning integer 0/1 values into a bool Series raises a pandas FutureWarning
+        # and will become an error in a future pandas release.
+        d.y.loc[idx] = ~d.y.loc[idx].astype(bool)
         if op == PoisonOp.DEC:
             d.m.loc[idx, "Poisoned"] = False
         else:
