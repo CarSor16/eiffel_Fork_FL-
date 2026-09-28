@@ -29,7 +29,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProfilesDir = Join-Path $Root "experiments\toml"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
-$LauncherVersion = "2026-09-28-advanced-attacks-1"
+$LauncherVersion = "2026-09-28-posthoc-inference-2"
 
 function Get-Profiles {
     if (-not (Test-Path $ProfilesDir)) {
@@ -159,7 +159,8 @@ function Show-AttackHelp {
     Write-Host "  partition: type=iid|dirichlet, dirichlet_alpha"
     Write-Host "  model: name and architecture-specific fields"
     Write-Host "  training: local_epochs, learning_rate, batch_size"
-    Write-Host "  storage: enabled, path, compression, capture_inference, probe_size"
+    Write-Host "  storage: enabled, path, compression, capture_inference, capture_logits,"
+    Write-Host "           capture_probe_features, capture_global_inference, probe_size"
     Write-Host ""
     Write-Host "Hydra remains the backend. TOML is translated to Hydra overrides, so ad-hoc"
     Write-Host "Hydra overrides can still be appended to any .\run.cmd experiment command."
@@ -268,7 +269,7 @@ try {
 
     if ($Smoke) {
         Write-Host "Running synthetic client integration smoke test..."
-        & $Python -m pytest -q -s "eiffel\core\tests\synthetic_client_integration_test.py" "eiffel\core\tests\synthetic_flower_integration_test.py"
+        & $Python -m pytest -q -s "eiffel\core\tests\synthetic_client_integration_test.py" "eiffel\core\tests\synthetic_flower_integration_test.py" "eiffel\core\tests\advanced_attacks_integration_test.py"
         if ($LASTEXITCODE -ne 0) {
             throw "Synthetic client smoke test failed."
         }
