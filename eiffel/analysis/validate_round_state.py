@@ -189,6 +189,37 @@ def validate(path: Path) -> list[str]:
                         f"{round_name}/{cid}: benign client has positive "
                         "data_poison_fraction"
                     )
+
+                if "data_poison_effective_fraction" in client.attrs:
+                    effective_fraction = float(
+                        client.attrs["data_poison_effective_fraction"]
+                    )
+                    if not math.isfinite(effective_fraction):
+                        errors.append(
+                            f"{round_name}/{cid}: data_poison_effective_fraction "
+                            "is NaN/inf"
+                        )
+                    elif not 0.0 <= effective_fraction <= 1.0:
+                        errors.append(
+                            f"{round_name}/{cid}: data_poison_effective_fraction "
+                            f"{effective_fraction} is outside [0, 1]"
+                        )
+                    if effective_fraction > 0.0 and not malicious:
+                        errors.append(
+                            f"{round_name}/{cid}: benign client has positive "
+                            "data_poison_effective_fraction"
+                        )
+                    if mechanism == "label_flip":
+                        if active and effective_fraction <= 0.0:
+                            errors.append(
+                                f"{round_name}/{cid}: active label_flip has zero "
+                                "effective poisoned fraction"
+                            )
+                        if not active and effective_fraction > 0.0:
+                            errors.append(
+                                f"{round_name}/{cid}: inactive label_flip has "
+                                "positive effective poisoned fraction"
+                            )
                 if (
                     active
                     and mechanism == "label_flip"
