@@ -146,12 +146,16 @@ class Pool:
             p_task = self.attack.base
             for cid in malicious_cids:
                 _train_shard = _train_shards.pop()
-                _train_shard.poison(
-                    p_task.fraction,
-                    p_task.operation,
-                    target_classes=self.attack.target,
-                    seed=self.seed,
-                )
+                # A pure model-poisoning profile uses base fraction 0.0.  Do not
+                # mutate even dataset metadata in that case; scheduled data
+                # poisoning can still be applied later by EiffelClient.poison().
+                if p_task.fraction > 0.0:
+                    _train_shard.poison(
+                        p_task.fraction,
+                        p_task.operation,
+                        target_classes=self.attack.target,
+                        seed=self.seed,
+                    )
                 self.shards[cid] = (_train_shard, _test_shards.pop())
 
     def __len__(self) -> int:
