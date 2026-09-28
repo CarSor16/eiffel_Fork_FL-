@@ -94,15 +94,33 @@ class InstrumentedFedAvg(FedAvg):
             self.store.save_global(0, self._global_weights)
 
     @staticmethod
-    def _extract_inference(
+    def _extract_probe_payload(
         metrics: dict,
-    ) -> tuple[np.ndarray | None, np.ndarray | None, list[str] | None]:
-        inference = None
+    ) -> tuple[
+        np.ndarray | None,
+        np.ndarray | None,
+        np.ndarray | None,
+        np.ndarray | None,
+        list[str] | None,
+    ]:
+        probabilities = None
+        logits = None
+        features = None
         labels = None
         families = None
-        payload = metrics.pop("_eiffel_inference", None)
+
+        payload = metrics.pop("_eiffel_probabilities", None)
+        if payload is None:
+            # Backward compatibility with runs/clients using the old transient key.
+            payload = metrics.pop("_eiffel_inference", None)
         if isinstance(payload, str):
-            inference = decode_array(payload)
+            probabilities = decode_array(payload)
+        payload = metrics.pop("_eiffel_logits", None)
+        if isinstance(payload, str):
+            logits = decode_array(payload)
+        payload = metrics.pop("_eiffel_probe_features", None)
+        if isinstance(payload, str):
+            features = decode_array(payload)
         payload = metrics.pop("_eiffel_probe_labels", None)
         if isinstance(payload, str):
             labels = decode_array(payload)
@@ -114,7 +132,7 @@ class InstrumentedFedAvg(FedAvg):
                     families = [str(v) for v in decoded]
             except json.JSONDecodeError:
                 logger.warning("Unable to decode probe attack-family metadata.")
-        return inference, labels, families
+        return probabilities, logits, features, labels, families
 
     @staticmethod
     def _decode_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
@@ -161,7 +179,9 @@ class InstrumentedFedAvg(FedAvg):
         clients: list[ClientProxy] = []
         fit_results: list[FitRes] = []
         local_weights: list[list[np.ndarray]] = []
-        inferences: list[np.ndarray | None] = []
+        probabilities: list[np.ndarray | None] = []
+        logits: list[np.ndarray | None] = []
+        probe_features: list[np.ndarray | None] = []
         probe_labels: list[np.ndarray | None] = []
         probe_families: list[list[str] | None] = []
 
@@ -171,8 +191,12 @@ class InstrumentedFedAvg(FedAvg):
             local_weights.append(
                 [np.asarray(x, dtype=np.float32) for x in parameters_to_ndarrays(fit_res.parameters)]
             )
-            inf, labels, families = self._extract_inference(fit_res.metrics)
-            inferences.append(inf)
+            probs, logit_values, features, labels, families = (
+                self._extract_probe_payload(fit_res.metrics)
+            )
+            probabilities.append(probs)
+            logits.append(logit_values)
+            probe_features.append(features)
             probe_labels.append(labels)
             probe_families.append(families)
 
@@ -189,7 +213,7 @@ class InstrumentedFedAvg(FedAvg):
             server_round=int(server_round),
             total_rounds=self.num_rounds,
             seed=self.seed,
-            probe_inferences=inferences,
+            probe_inferences=probabilities,
             probe_labels=probe_labels,
             probe_families=probe_families,
         )
@@ -215,8 +239,11 @@ class InstrumentedFedAvg(FedAvg):
                 submitted_update=submitted_updates[idx],
                 pre_attack_update=pre_updates[idx] if changed else None,
                 audit=audits[idx],
-                inference=inferences[idx],
+                probabilities=probabilities[idx],
+                logits=logits[idx],
+                probe_features=probe_features[idx],
                 probe_labels=probe_labels[idx],
+                probe_families=probe_families[idx],
                 malicious=malicious,
                 attack_active=bool(changed),
                 mechanism=mechanism if changed else "none",
@@ -227,9 +254,6 @@ class InstrumentedFedAvg(FedAvg):
                 self._decode_metrics(fit_results[idx].metrics),
                 phase="fit",
             )
-            if probe_families[idx]:
-                self.store.save_probe_families(probe_families[idx] or [])
-
         self.store.save_round_metadata(
             int(server_round),
             attack_mechanism=mechanism,
@@ -269,12 +293,29 @@ class InstrumentedFedAvg(FedAvg):
                 _failure_summary(list(failures)),
             )
         for client, evaluate_res in results:
+            probs, logit_values, features, labels, families = (
+                self._extract_probe_payload(evaluate_res.metrics)
+            )
+            cid = str(client.cid)
             self.store.save_client_metrics(
                 int(server_round),
-                str(client.cid),
+                cid,
                 self._decode_metrics(evaluate_res.metrics),
                 phase="evaluate",
             )
+            self.store.save_probe(
+                cid,
+                features=features,
+                labels=labels,
+                families=families,
+            )
+            if bool(self.storage_cfg.get("capture_global_inference", True)):
+                self.store.save_global_inference(
+                    int(server_round),
+                    cid,
+                    probabilities=probs,
+                    logits=logit_values,
+                )
         if results and self.store.flush_each_round:
             self.store.flush()
         return super().aggregate_evaluate(server_round, results, failures)
