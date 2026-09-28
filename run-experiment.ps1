@@ -280,6 +280,7 @@ try {
     if ($Tests) {
         Write-Host "Running focused FL-security tests..."
         $TestFiles = @(
+            "eiffel\core\tests\client_test.py",
             "eiffel\core\tests\model_attacks_test.py",
             "eiffel\core\tests\label_flip_attack_test.py",
             "eiffel\core\tests\multiclass_models_test.py",
