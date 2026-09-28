@@ -160,3 +160,159 @@ def test_multiclass_is_not_silently_enabled_for_real_nfv2():
 
     with pytest.raises(TomlExperimentError, match="synthetic_stress"):
         profile_to_overrides(profile)
+
+
+
+@pytest.mark.parametrize(
+    ("mechanism", "nested_key", "expected_group", "expected_override"),
+    [
+        (
+            "min_max",
+            "min_max",
+            "min_max",
+            "++model_attack.max_lambda=7.5",
+        ),
+        (
+            "min_sum",
+            "min_sum",
+            "min_sum",
+            "++model_attack.search_steps=18",
+        ),
+        (
+            "adaptive_stealth",
+            "adaptive",
+            "adaptive_stealth",
+            "++model_attack.l2_quantile=0.9",
+        ),
+        (
+            "heterogeneity_aware_mimicry",
+            "heterogeneity",
+            "heterogeneity_aware_mimicry",
+            "++model_attack.neighbors=2",
+        ),
+    ],
+)
+def test_advanced_attack_translation_is_dataset_portable(
+    mechanism,
+    nested_key,
+    expected_group,
+    expected_override,
+):
+    profile = {
+        "experiment": {"num_clients": 8, "rounds": 6},
+        # Deliberately use a non-built-in dataset name. hydra_group is the portable
+        # escape hatch for any Eiffel dataset configuration group.
+        "dataset": {
+            "name": "my_future_dataset",
+            "hydra_group": "custom/my_future_dataset",
+            "task": "binary",
+        },
+        "partition": {"type": "iid"},
+        "model": {"name": "mlp"},
+        "attack": {
+            "mechanism": mechanism,
+            "malicious_fraction": 0.25,
+            nested_key: {},
+        },
+        "aggregation": {"name": "fedavg"},
+    }
+    if mechanism == "min_max":
+        profile["attack"][nested_key] = {
+            "direction": "sign",
+            "max_lambda": 7.5,
+        }
+    elif mechanism == "min_sum":
+        profile["attack"][nested_key] = {"search_steps": 18}
+    elif mechanism == "adaptive_stealth":
+        profile["attack"][nested_key] = {"l2_quantile": 0.9}
+    else:
+        profile["attack"][nested_key] = {
+            "neighbors": 2,
+            "similarity": "l2",
+            "mimicry_lambda": 0.7,
+        }
+
+    overrides = profile_to_overrides(profile)
+
+    assert "+datasets=custom/my_future_dataset" in overrides
+    assert f"model_attack={expected_group}" in overrides
+    assert expected_override in overrides
+    assert "num_attackers=2" in overrides
+    assert "poisoning/profile=clean" in overrides
+
+
+def test_targeted_family_translation_uses_configurable_dataset_metadata():
+    profile = {
+        "experiment": {"num_clients": 8, "rounds": 8},
+        "dataset": {
+            "name": "another_dataset",
+            "hydra_group": "custom/another_dataset",
+            "task": "binary",
+        },
+        "partition": {"type": "iid"},
+        "model": {"name": "mlp"},
+        "attack": {
+            "mechanism": "targeted_family_poisoning",
+            "malicious_fraction": 0.25,
+            "targeted": {
+                "target_family": "Arbitrary-Threat-Name",
+                "target_amplification": 2.25,
+                "target_mimicry_lambda": 0.2,
+            },
+            "schedule": {"type": "late", "start_round": 4},
+        },
+        "aggregation": {"name": "fedavg"},
+        "storage": {"capture_inference": True, "probe_size": 128},
+    }
+
+    overrides = profile_to_overrides(profile)
+
+    assert "+datasets=custom/another_dataset" in overrides
+    assert "model_attack=targeted_family_poisoning" in overrides
+    assert "++model_attack.target_family=Arbitrary-Threat-Name" in overrides
+    assert "++model_attack.target_amplification=2.25" in overrides
+    assert "++model_attack.target_mimicry_lambda=0.2" in overrides
+    assert "storage.capture_inference=true" in overrides
+    assert "model_attack.schedule.type=late" in overrides
+    assert "model_attack.schedule.start_round=4" in overrides
+
+
+def test_targeted_family_requires_probe_capture():
+    profile = {
+        "experiment": {"num_clients": 6, "rounds": 5},
+        "dataset": {
+            "name": "portable",
+            "hydra_group": "custom/portable",
+        },
+        "model": {"name": "mlp"},
+        "attack": {
+            "mechanism": "targeted_family_poisoning",
+            "malicious_fraction": 0.33,
+            "targeted": {"target_family": "Threat-A"},
+        },
+        "aggregation": {"name": "fedavg"},
+        "storage": {"capture_inference": False},
+    }
+
+    with pytest.raises(TomlExperimentError, match="capture_inference"):
+        profile_to_overrides(profile)
+
+
+@pytest.mark.parametrize("mechanism", ["min_max", "min_sum", "adaptive_stealth"])
+def test_optimized_attacks_require_two_benign_clients(mechanism):
+    profile = {
+        "experiment": {"num_clients": 3, "rounds": 5},
+        "dataset": {
+            "name": "portable",
+            "hydra_group": "custom/portable",
+        },
+        "model": {"name": "mlp"},
+        "attack": {
+            "mechanism": mechanism,
+            "malicious_fraction": 0.67,
+        },
+        "aggregation": {"name": "fedavg"},
+    }
+
+    with pytest.raises(TomlExperimentError, match="two benign"):
+        profile_to_overrides(profile)
