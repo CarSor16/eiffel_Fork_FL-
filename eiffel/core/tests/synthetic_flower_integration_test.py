@@ -108,6 +108,24 @@ probe_size = 32
         assert "metrics" in first_client
         assert "fit" in first_client["metrics"]
         assert "evaluate" in first_client["metrics"]
+        assert "probabilities" in first_client
+        assert "logits" in first_client
+        assert "inference" in first_client
+        assert first_client["probabilities"].shape == first_client["logits"].shape
+
+        assert "probe" in h5
+        assert "features" in h5["probe"]
+        assert "labels" in h5["probe"]
+        assert h5["probe"]["features"].shape[0] == 32
+        assert h5["probe"]["labels"].shape[0] == 32
+
+        assert "global_inference" in h5
+        global_round = h5["global_inference"]["round_0001"]
+        assert clients[0] in global_round
+        global_client = global_round[clients[0]]
+        assert "probabilities" in global_client
+        assert "logits" in global_client
+        assert global_client["probabilities"].shape == global_client["logits"].shape
 
     fit = json.loads((run_dir / "fit.json").read_text(encoding="utf-8"))
     distributed = json.loads(
