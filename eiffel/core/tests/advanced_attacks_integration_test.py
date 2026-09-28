@@ -1,0 +1,155 @@
+"""Small end-to-end Flower checks for representative advanced attacks."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+import h5py
+import pytest
+
+from eiffel.toml_runner import build_command
+
+
+def _profile_text(mechanism: str) -> str:
+    if mechanism == "min_max":
+        attack = """
+[attack]
+mechanism = "min_max"
+malicious_fraction = 0.25
+
+[attack.min_max]
+direction = "sign"
+search_steps = 12
+max_lambda = 4.0
+constraint_margin = 1.05
+"""
+    elif mechanism == "targeted_family_poisoning":
+        attack = """
+[attack]
+mechanism = "targeted_family_poisoning"
+malicious_fraction = 0.25
+
+[attack.targeted]
+target_family = "Scan"
+target_amplification = 1.5
+target_mimicry_lambda = 0.2
+"""
+    else:  # pragma: no cover - test construction guard
+        raise AssertionError(mechanism)
+
+    return f"""
+[experiment]
+name = "advanced-e2e-{mechanism}"
+seed = 2026
+num_clients = 4
+rounds = 1
+
+[dataset]
+name = "synthetic_stress"
+task = "binary"
+samples_per_client = 64
+central_test_size = 192
+num_features = 8
+num_classes = 2
+rare_class_id = 1
+rare_class_probability = 0.35
+rare_specialist_client = 0
+rare_specialist_strength = 0.10
+feature_noise = 0.35
+stress_latent_dim = 4
+stress_informative_features = 6
+stress_redundant_features = 2
+stress_class_separation = 1.5
+stress_latent_noise = 0.6
+stress_secondary_mode_probability = 0.15
+stress_hard_example_fraction = 0.03
+stress_train_label_noise = 0.0
+stress_client_shift_std = 0.04
+stress_central_shift_std = 0.04
+stress_outlier_fraction = 0.0
+
+[partition]
+type = "iid"
+
+[model]
+name = "stress_mlp"
+hidden1 = 12
+hidden2 = 6
+weight_decay = 0.0
+
+[training]
+local_epochs = 1
+learning_rate = 0.001
+batch_size = 16
+
+{attack}
+
+[attack.schedule]
+type = "continuous"
+
+[aggregation]
+name = "fedavg"
+
+[storage]
+enabled = true
+path = "round_state.h5"
+compression = "gzip"
+compression_level = 1
+flush_each_round = true
+capture_inference = true
+probe_size = 96
+""".strip()
+
+
+@pytest.mark.parametrize(
+    "mechanism",
+    ["min_max", "targeted_family_poisoning"],
+)
+def test_advanced_attack_runs_through_toml_hydra_flower_and_hdf5(
+    tmp_path: Path,
+    mechanism: str,
+):
+    profile = tmp_path / f"{mechanism}.toml"
+    run_dir = tmp_path / f"run-{mechanism}"
+    profile.write_text(_profile_text(mechanism), encoding="utf-8")
+
+    command = build_command(
+        profile,
+        extra=[
+            f"hydra.run.dir={run_dir.as_posix()}",
+            "hydra.output_subdir=.hydra",
+        ],
+    )
+    completed = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[3],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=180,
+    )
+    assert completed.returncode == 0, completed.stdout
+
+    h5_path = run_dir / "round_state.h5"
+    assert h5_path.exists(), completed.stdout
+    with h5py.File(h5_path, "r") as h5:
+        clients = h5["clients"]["round_0001"]
+        assert len(clients) == 4
+        malicious = [
+            client
+            for client in clients.values()
+            if bool(int(client.attrs.get("malicious", 0)))
+        ]
+        assert len(malicious) == 1
+        assert bool(int(malicious[0].attrs.get("attack_active", 0)))
+        assert "submitted_update" in malicious[0]
+        assert "pre_attack_update" in malicious[0]
+        assert "audit" in malicious[0]
+
+        metadata = h5["rounds"]["round_0001"].attrs
+        recorded = metadata["attack_mechanism"]
+        if isinstance(recorded, bytes):
+            recorded = recorded.decode("utf-8")
+        assert str(recorded) == mechanism
+        assert int(metadata["malicious_clients"]) == 1
