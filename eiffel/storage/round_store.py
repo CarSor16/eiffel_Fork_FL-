@@ -43,7 +43,7 @@ class RoundStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._h5 = h5py.File(self.path, "a")
             self._h5.attrs["format"] = "eiffel-round-state"
-            self._h5.attrs["format_version"] = 1
+            self._h5.attrs["format_version"] = 2
 
     def close(self) -> None:
         if self._h5 is not None:
@@ -73,6 +73,32 @@ class RoundStore:
                 kwargs["compression_opts"] = self.compression_level
             kwargs["shuffle"] = True
         group.create_dataset(name, data=arr, **kwargs)
+
+    def _write_string_array(
+        self,
+        group: h5py.Group,
+        name: str,
+        values: Sequence[str],
+    ) -> None:
+        if name in group:
+            del group[name]
+        dtype = h5py.string_dtype(encoding="utf-8")
+        group.create_dataset(
+            name,
+            data=np.asarray([str(v) for v in values], dtype=object),
+            dtype=dtype,
+        )
+
+    @staticmethod
+    def _same_values(dataset: h5py.Dataset, values: np.ndarray) -> bool:
+        existing = np.asarray(dataset)
+        if existing.dtype.kind in {"S", "O", "U"}:
+            existing = np.asarray([
+                value.decode("utf-8") if isinstance(value, bytes) else str(value)
+                for value in existing.reshape(-1)
+            ], dtype=object).reshape(existing.shape)
+            values = np.asarray([str(value) for value in values.reshape(-1)], dtype=object).reshape(values.shape)
+        return existing.shape == values.shape and bool(np.array_equal(existing, values))
 
     def _write_layers(
         self,
@@ -132,19 +158,82 @@ class RoundStore:
         for key, value in self._flatten_metrics(metrics).items():
             group.attrs[_safe(key)] = np.float32(value)
 
+    def save_probe(
+        self,
+        cid: str,
+        *,
+        features: np.ndarray | None = None,
+        labels: np.ndarray | None = None,
+        families: Sequence[str] | None = None,
+    ) -> None:
+        """Persist a deterministic probe once, with per-client fallback when needed.
+
+        The canonical /probe datasets represent the first observed probe.  With the
+        default common-test setup every client hard-links to those datasets without
+        duplicating bytes.  If a project uses client-specific test sets, only the
+        differing client probe is stored separately below /probe/clients/<cid>.
+        """
+        if self._h5 is None:
+            return
+        probe = self._h5.require_group("probe")
+        client_probe = probe.require_group("clients").require_group(_safe(cid))
+
+        def numeric(name: str, value: np.ndarray | None, dtype: str) -> None:
+            if value is None:
+                return
+            arr = np.asarray(value, dtype=np.dtype(dtype))
+            if name not in probe:
+                self._write_array(probe, name, arr, dtype=dtype)
+            if name in client_probe:
+                return
+            if self._same_values(probe[name], arr):
+                client_probe[name] = probe[name]
+            else:
+                self._write_array(client_probe, name, arr, dtype=dtype)
+
+        numeric("features", features, "float32")
+        numeric("labels", labels, "int16")
+
+        if families is not None:
+            family_values = np.asarray([str(v) for v in families], dtype=object)
+            if "families" not in probe:
+                self._write_string_array(probe, "families", families)
+            if "families" not in client_probe:
+                if self._same_values(probe["families"], family_values):
+                    client_probe["families"] = probe["families"]
+                else:
+                    self._write_string_array(client_probe, "families", families)
+
     def save_probe_families(self, families: Sequence[str]) -> None:
-        """Store the fixed probe attack-family labels once."""
+        """Backward-compatible canonical family metadata writer."""
         if self._h5 is None or not families:
             return
         probe = self._h5.require_group("probe")
-        if "families" in probe:
+        if "families" not in probe:
+            self._write_string_array(probe, "families", families)
+
+    def save_global_inference(
+        self,
+        server_round: int,
+        cid: str,
+        *,
+        probabilities: np.ndarray | None,
+        logits: np.ndarray | None,
+    ) -> None:
+        """Persist inference of the aggregated global model for one client probe."""
+        if self._h5 is None or probabilities is None:
             return
-        dtype = h5py.string_dtype(encoding="utf-8")
-        probe.create_dataset(
-            "families",
-            data=np.asarray([str(v) for v in families], dtype=object),
-            dtype=dtype,
+        group = (
+            self._h5.require_group("global_inference")
+            .require_group(f"round_{int(server_round):04d}")
+            .require_group(_safe(cid))
         )
+        self._write_array(group, "probabilities", probabilities, dtype="float16")
+        if "inference" in group:
+            del group["inference"]
+        group["inference"] = group["probabilities"]
+        if logits is not None:
+            self._write_array(group, "logits", logits, dtype="float16")
 
     def save_round_metadata(
         self,
@@ -172,8 +261,12 @@ class RoundStore:
         submitted_update: NDArraySeq,
         pre_attack_update: NDArraySeq | None = None,
         audit: Mapping[str, float] | None = None,
+        probabilities: np.ndarray | None = None,
+        logits: np.ndarray | None = None,
         inference: np.ndarray | None = None,
+        probe_features: np.ndarray | None = None,
         probe_labels: np.ndarray | None = None,
+        probe_families: Sequence[str] | None = None,
         malicious: bool = False,
         attack_active: bool = False,
         mechanism: str = "none",
@@ -202,13 +295,28 @@ class RoundStore:
             for key, value in audit.items():
                 audit_group.attrs[str(key)] = np.float32(value)
 
-        if inference is not None:
-            self._write_array(group, "inference", inference, dtype="float16")
+        if probabilities is None:
+            probabilities = inference
+        if probabilities is not None:
+            self._write_array(
+                group,
+                "probabilities",
+                probabilities,
+                dtype="float16",
+            )
+            # HDF5 hard-link: legacy readers see /inference without duplicating data.
+            if "inference" in group:
+                del group["inference"]
+            group["inference"] = group["probabilities"]
+        if logits is not None:
+            self._write_array(group, "logits", logits, dtype="float16")
 
-        if probe_labels is not None:
-            probe = self._h5.require_group("probe")
-            if "labels" not in probe:
-                self._write_array(probe, "labels", probe_labels, dtype="int16")
+        self.save_probe(
+            cid,
+            features=probe_features,
+            labels=probe_labels,
+            families=probe_families,
+        )
 
     def mark_round_complete(self, server_round: int) -> None:
         if self._h5 is None:
