@@ -178,11 +178,11 @@ class InstrumentedFedAvg(FedAvg):
                 "Flower failures. Refusing to create an empty experiment."
             )
         if failures:
-            logger.warning(
-                "Round %s fit completed with %s client failure(s): %s",
-                server_round,
-                len(failures),
-                _failure_summary(list(failures)),
+            details = _failure_summary(list(failures))
+            raise RuntimeError(
+                f"Round {server_round} fit reported {len(failures)} client "
+                f"failure(s). Refusing partial aggregation because it would change "
+                f"the configured benign/malicious population. {details}"
             )
         if self._global_weights is None:
             logger.warning(
@@ -318,11 +318,10 @@ class InstrumentedFedAvg(FedAvg):
                 f"Flower reported {len(failures)} failure(s). {details}"
             )
         if failures:
-            logger.warning(
-                "Round %s evaluation completed with %s client failure(s): %s",
-                server_round,
-                len(failures),
-                _failure_summary(list(failures)),
+            details = _failure_summary(list(failures))
+            raise RuntimeError(
+                f"Round {server_round} evaluation reported {len(failures)} client "
+                f"failure(s). Refusing incomplete persisted metrics. {details}"
             )
         for client, evaluate_res in results:
             probs, logit_values, features, labels, families = (
