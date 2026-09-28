@@ -5,6 +5,13 @@ import pytest
 from tensorflow import keras
 
 from eiffel.core.client import predict_probabilities_and_logits
+from eiffel.models.advanced import (
+    mk_cnn1d,
+    mk_ft_transformer,
+    mk_p4p_mlp,
+    mk_stress_mlp,
+)
+from eiffel.models.supervized import mk_popoola_mlp
 
 
 def test_binary_probabilities_match_sigmoid_of_exact_logits():
@@ -88,4 +95,52 @@ def test_logit_capture_fails_fast_for_unsupported_output_layer():
             model,
             np.zeros((2, 2), dtype=np.float32),
             batch_size=2,
+        )
+
+
+@pytest.mark.parametrize("task,num_classes", [("binary", 2), ("multiclass", 4)])
+def test_supported_models_expose_consistent_probabilities_and_logits(
+    task,
+    num_classes,
+):
+    builders = (
+        lambda: mk_popoola_mlp(8, task=task, num_classes=num_classes),
+        lambda: mk_p4p_mlp(8, task=task, num_classes=num_classes),
+        lambda: mk_cnn1d(8, task=task, num_classes=num_classes),
+        lambda: mk_ft_transformer(
+            8,
+            task=task,
+            num_classes=num_classes,
+            d_token=8,
+            n_heads=2,
+            n_blocks=1,
+        ),
+        lambda: mk_stress_mlp(8, task=task, num_classes=num_classes),
+    )
+    x = np.linspace(-1.0, 1.0, 24, dtype=np.float32).reshape(3, 8)
+
+    for build in builders:
+        model = build()
+        probabilities, logits = predict_probabilities_and_logits(
+            model,
+            x,
+            batch_size=3,
+        )
+        assert probabilities.shape == logits.shape
+        assert probabilities.shape[0] == len(x)
+        if task == "binary":
+            assert probabilities.shape[1] == 1
+            expected = 1.0 / (1.0 + np.exp(-logits))
+        else:
+            assert probabilities.shape[1] == num_classes
+            shifted = logits - logits.max(axis=1, keepdims=True)
+            expected = np.exp(shifted) / np.exp(shifted).sum(
+                axis=1,
+                keepdims=True,
+            )
+        np.testing.assert_allclose(
+            probabilities,
+            expected,
+            rtol=2e-5,
+            atol=2e-5,
         )
