@@ -4,7 +4,12 @@ import numpy as np
 import pandas as pd
 
 from eiffel.datasets.nfv2 import NFV2Dataset
-from eiffel.datasets.poisoning import PoisonOp
+from eiffel.datasets.poisoning import (
+    PoisonIns,
+    PoisonOp,
+    poisoning_fraction_at_round,
+    poisoning_is_configured,
+)
 
 
 def _dataset():
@@ -84,3 +89,33 @@ def test_untargeted_label_flip_can_flip_the_whole_local_dataset():
         1 - original.to_numpy(),
     )
     assert dataset.m["Poisoned"].all()
+
+
+def test_poisoning_profile_state_is_reconstructed_by_round():
+    late = PoisonIns(
+        profile="0.0+0.4{2}-0.4{4}",
+        n_rounds=5,
+        target=None,
+    )
+    assert poisoning_is_configured(late)
+    assert [
+        poisoning_fraction_at_round(late, round_number)
+        for round_number in range(1, 6)
+    ] == [0.0, 0.4, 0.4, 0.0, 0.0]
+
+    gradual = PoisonIns(
+        profile="0.0+0.2[2:4]",
+        n_rounds=5,
+        target=None,
+    )
+    np.testing.assert_allclose(
+        [
+            poisoning_fraction_at_round(gradual, round_number)
+            for round_number in range(1, 6)
+        ],
+        [0.0, 0.2, 0.4, 0.6, 0.6],
+    )
+
+    clean = PoisonIns(profile="0.0", n_rounds=3, target=None)
+    assert not poisoning_is_configured(clean)
+    assert poisoning_fraction_at_round(clean, 3) == 0.0
