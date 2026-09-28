@@ -135,6 +135,21 @@ class InstrumentedFedAvg(FedAvg):
         return probabilities, logits, features, labels, families
 
     @staticmethod
+    def _logical_cid(metrics: Mapping[str, Any], fallback: str) -> str:
+        """Return Eiffel's logical CID instead of relying on Flower proxy IDs."""
+        reported = metrics.get("_cid")
+        if reported is None:
+            return str(fallback)
+        if isinstance(reported, str):
+            try:
+                decoded = json.loads(reported)
+                if isinstance(decoded, str):
+                    return decoded
+            except json.JSONDecodeError:
+                pass
+        return str(reported)
+
+    @staticmethod
     def _decode_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
         """Decode Eiffel's JSON-valued Flower metrics without mutating the input."""
         decoded: dict[str, Any] = {}
@@ -177,6 +192,7 @@ class InstrumentedFedAvg(FedAvg):
             return super().aggregate_fit(server_round, results, failures)
 
         clients: list[ClientProxy] = []
+        logical_cids: list[str] = []
         fit_results: list[FitRes] = []
         local_weights: list[list[np.ndarray]] = []
         probabilities: list[np.ndarray | None] = []
@@ -187,6 +203,9 @@ class InstrumentedFedAvg(FedAvg):
 
         for client, fit_res in results:
             clients.append(client)
+            logical_cids.append(
+                self._logical_cid(fit_res.metrics, str(client.cid))
+            )
             fit_results.append(fit_res)
             local_weights.append(
                 [np.asarray(x, dtype=np.float32) for x in parameters_to_ndarrays(fit_res.parameters)]
@@ -204,7 +223,7 @@ class InstrumentedFedAvg(FedAvg):
             [local - global_ for local, global_ in zip(weights, self._global_weights)]
             for weights in local_weights
         ]
-        malicious_mask = ["malicious" in str(client.cid) for client in clients]
+        malicious_mask = ["malicious" in cid for cid in logical_cids]
 
         submitted_updates, schedule_multiplier = apply_round_attack(
             pre_updates,
@@ -232,10 +251,11 @@ class InstrumentedFedAvg(FedAvg):
 
         for idx, client in enumerate(clients):
             malicious = malicious_mask[idx]
+            cid = logical_cids[idx]
             changed = malicious and attack_active and mechanism not in {"none", "label_flip"}
             self.store.save_client(
                 int(server_round),
-                str(client.cid),
+                cid,
                 submitted_update=submitted_updates[idx],
                 pre_attack_update=pre_updates[idx] if changed else None,
                 audit=audits[idx],
@@ -250,7 +270,7 @@ class InstrumentedFedAvg(FedAvg):
             )
             self.store.save_client_metrics(
                 int(server_round),
-                str(client.cid),
+                cid,
                 self._decode_metrics(fit_results[idx].metrics),
                 phase="fit",
             )
@@ -296,7 +316,10 @@ class InstrumentedFedAvg(FedAvg):
             probs, logit_values, features, labels, families = (
                 self._extract_probe_payload(evaluate_res.metrics)
             )
-            cid = str(client.cid)
+            cid = self._logical_cid(
+                evaluate_res.metrics,
+                str(client.cid),
+            )
             self.store.save_client_metrics(
                 int(server_round),
                 cid,
