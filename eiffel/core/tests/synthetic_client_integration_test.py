@@ -82,6 +82,7 @@ def test_synthetic_client_can_fit_and_evaluate_one_round():
         assert examples == 128
         assert len(parameters) == len(model.get_weights())
         assert "_cid" in metrics
+        assert metrics["_eiffel_malicious"] is False
         assert "global" in metrics
         assert "_eiffel_probabilities" in metrics
         assert "_eiffel_logits" in metrics
