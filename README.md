@@ -1086,8 +1086,9 @@ mapping instead of silently applying the binary operation to labels 0..5.
 Every completed run can be checked for the HDF5 invariants required by the analysis:
 round 0 global weights, previous/current global states, submitted-update shapes and
 float32 dtypes, finite values, malicious/attack flags, pre-attack updates when required,
-float16 probabilities/logits, float32 probe features, int16 probe labels,
-probability/logit consistency, optional global inference and last_complete_round.
+configured/effective data-poisoning fractions, float16 probabilities/logits, float32
+probe features, int16 probe labels, probability/logit consistency, optional global
+inference and last_complete_round.
 
     .\run.cmd -ValidateHdf5 "outputs\YYYY-MM-DD\HH-MM-SS\round_state.h5"
 
@@ -1106,12 +1107,15 @@ Each fresh run produces only two plots:
   clients across communication rounds.
 
 Both plots include the malicious-client context in the title. Rounds in which a
-model-poisoning attack is active are shaded using the recorded attack multiplier.
+model-poisoning or label-flipping attack is effectively active are shaded using the
+recorded attack multiplier. For label flipping, a scheduled targeted attack is not
+marked active on a client that has no matching local target samples.
 
 The corresponding CSV files retain the richer numeric detail:
 
 - `round_performance.csv`: round, total clients, malicious clients, active malicious
-  clients, malicious fraction, attack multiplier and the main NIDS scores.
+  clients, malicious fraction, attack multiplier, mean effective local data-poisoning
+  fraction when available, and the main NIDS scores.
 - `round_updates.csv`: benign/malicious update L2, cosine-to-mean,
   distance-to-mean, sign agreement, malicious-to-benign L2 ratio and the magnitude
   of the malicious attack transformation when a pre-attack update is available.
