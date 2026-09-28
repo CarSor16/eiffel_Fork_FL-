@@ -220,20 +220,41 @@ class RoundStore:
         probabilities: np.ndarray | None,
         logits: np.ndarray | None,
     ) -> None:
-        """Persist inference of the aggregated global model for one client probe."""
+        """Persist aggregated-model inference with lossless HDF5 deduplication.
+
+        Clients using the common test probe produce identical global-model outputs.
+        When the float16 payload already exists in this round, hard-link it instead
+        of storing duplicate bytes. Client-specific probes remain independent whenever
+        their outputs differ.
+        """
         if self._h5 is None or probabilities is None:
             return
-        group = (
+        round_group = (
             self._h5.require_group("global_inference")
             .require_group(f"round_{int(server_round):04d}")
-            .require_group(_safe(cid))
         )
-        self._write_array(group, "probabilities", probabilities, dtype="float16")
+        safe_cid = _safe(cid)
+        group = round_group.require_group(safe_cid)
+
+        def numeric(name: str, value: np.ndarray | None) -> None:
+            if value is None:
+                return
+            arr = np.asarray(value, dtype=np.float16)
+            if name in group:
+                del group[name]
+            for other_cid, other_group in round_group.items():
+                if other_cid == safe_cid or name not in other_group:
+                    continue
+                if self._same_values(other_group[name], arr):
+                    group[name] = other_group[name]
+                    return
+            self._write_array(group, name, arr, dtype="float16")
+
+        numeric("probabilities", probabilities)
         if "inference" in group:
             del group["inference"]
         group["inference"] = group["probabilities"]
-        if logits is not None:
-            self._write_array(group, "logits", logits, dtype="float16")
+        numeric("logits", logits)
 
     def save_round_metadata(
         self,
