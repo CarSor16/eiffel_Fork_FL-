@@ -1,0 +1,10 @@
+# @package model_attack
+enabled: true
+mechanism: heterogeneity_aware_mimicry
+strength: 3.0
+neighbors: 3
+similarity: cosine
+mimicry_lambda: 0.75
+schedule:
+  type: continuous
+  start_round: 1
