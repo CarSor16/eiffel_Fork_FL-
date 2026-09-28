@@ -367,3 +367,39 @@ def test_storage_posthoc_inference_flags_translate():
     assert "storage.capture_global_inference=false" in overrides
     assert "storage.probe_size=64" in overrides
 
+
+
+def _targeted_probe_profile(storage):
+    return {
+        "experiment": {"num_clients": 6, "rounds": 5},
+        "dataset": {
+            "name": "portable",
+            "hydra_group": "custom/portable",
+        },
+        "model": {"name": "mlp"},
+        "attack": {
+            "mechanism": "targeted_family_poisoning",
+            "malicious_fraction": 0.33,
+            "targeted": {"target_family": "Threat-A"},
+        },
+        "aggregation": {"name": "fedavg"},
+        "storage": storage,
+    }
+
+
+def test_targeted_family_requires_enabled_storage():
+    with pytest.raises(TomlExperimentError, match="storage.enabled=true"):
+        profile_to_overrides(
+            _targeted_probe_profile(
+                {"enabled": False, "capture_inference": True, "probe_size": 64}
+            )
+        )
+
+
+def test_targeted_family_requires_nonempty_probe():
+    with pytest.raises(TomlExperimentError, match="probe_size > 0"):
+        profile_to_overrides(
+            _targeted_probe_profile(
+                {"enabled": True, "capture_inference": True, "probe_size": 0}
+            )
+        )
