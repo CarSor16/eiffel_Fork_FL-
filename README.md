@@ -339,6 +339,11 @@ In addition to Eiffel's original data-poisoning/label-flipping mechanisms, this 
 - **LIE**
 - **Gradient Mimicry**
 - **Colluding Sign Flip**
+- **Min-Max**
+- **Min-Sum**
+- **Adaptive Stealth**
+- **Heterogeneity-Aware Mimicry**
+- **Targeted Family Poisoning**
 
 The attacks operate on the client model delta:
 
@@ -349,6 +354,32 @@ The attacks operate on the client model delta:
 so the attack implementation is independent of the neural-network architecture as long as all clients use the same parameter layout.
 
 This makes it possible to test the same poisoning mechanism on an MLP, CNN or Transformer without rewriting the attack itself.
+
+The advanced attacks are intentionally **dataset-agnostic**. Min-Max, Min-Sum,
+Adaptive Stealth and Heterogeneity-Aware Mimicry operate only on submitted parameter
+deltas, so changing the dataset does not require changing attack code. Targeted Family
+Poisoning additionally consumes Eiffel's generic probe metadata (family name, true label
+and inference output); the target family is a TOML value and must be changed to a family
+name exposed by the selected dataset. No feature index, class count or family name is
+hard-coded in the attack implementation.
+
+Ready-to-run advanced profiles:
+
+```powershell
+.\run.cmd synthetic_50k_min_max
+.\run.cmd synthetic_50k_min_sum
+.\run.cmd synthetic_50k_adaptive_stealth
+.\run.cmd synthetic_50k_adaptive_stealth_gradual
+.\run.cmd synthetic_50k_heterogeneity_aware_mimicry
+.\run.cmd synthetic_50k_targeted_family_poisoning
+```
+
+Validate or run the complete advanced set with:
+
+```powershell
+.\run.cmd -Suite advanced -DryRun
+.\run.cmd -Suite advanced
+```
 
 ---
 
