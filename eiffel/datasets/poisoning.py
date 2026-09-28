@@ -211,39 +211,78 @@ def parse_poisoning_selector(
     base = float(m.group("base"))
     tasks: PoisonTasks = {}
 
-    p = re.compile(selector_re)
-    for m in p.finditer(selector):
-        if m is None:
-            raise ValueError(f"Invalid selector: '{selector}'; no base value found")
+    # Parse modifiers left-to-right and require full consumption.  The previous
+    # implementation nested two finditer loops and accidentally reused a filtered
+    # round list across tokens (for example +0.4{2}-0.4{4} lost the decrement).
+    modifier_re = re.compile(selector_re)
+    cursor = m.end()
+
+    # Historical Eiffel documentation treats a trailing '*' or '[:]' directly
+    # after the base as equivalent to the plain base value.
+    for base_suffix in ("*", "[:]"):
+        if selector.startswith(base_suffix, cursor):
+            cursor += len(base_suffix)
+            break
+
+    while cursor < len(selector):
+        modifier = modifier_re.match(selector, cursor)
+        if modifier is None:
+            raise ValueError(
+                f"Invalid selector: '{selector}'; unexpected syntax at "
+                f"position {cursor}"
+            )
+
+        _op = modifier.group("op")
+        _inc = modifier.group("inc")
+        if _op is None or _inc is None:
+            raise ValueError(f"Invalid selector: '{selector}'; no increment found")
+
+        op = PoisonOp(_op)
+        inc = float(_inc)
+        if not 0.0 <= inc <= 1.0:
+            raise ValueError(
+                f"Invalid selector: '{selector}'; increment must be in [0, 1]"
+            )
 
         rounds = list(range(1, n_rounds + 1))
+        if modifier.group("range") is not None:
+            from_ = (
+                int(modifier.group("from"))
+                if modifier.group("from") is not None
+                else 1
+            )
+            to = (
+                int(modifier.group("to"))
+                if modifier.group("to") is not None
+                else n_rounds
+            )
+            if from_ < 1 or to > n_rounds or from_ > to:
+                raise IndexError(
+                    f"Invalid range: '{selector}'; round index out of bounds"
+                )
+            rounds = list(range(from_, to + 1))
+        elif modifier.group("set") is not None:
+            requested = [
+                int(value)
+                for value in modifier.group("set_items").split(",")
+                if value
+            ]
+            if any(value < 1 or value > n_rounds for value in requested):
+                raise IndexError(
+                    f"Invalid set: '{selector}'; round index out of bounds"
+                )
+            rounds = requested
 
-        for m in p.finditer(selector):
-            _op = m.group("op")
-            _inc = m.group("inc")
-            if _op is None or _inc is None:
-                raise ValueError(f"Invalid selector: '{selector}'; no increment found")
+        # Later modifiers intentionally overwrite earlier tasks for the same round,
+        # matching the documented Eiffel selector precedence.
+        for round_number in rounds:
+            tasks[round_number] = PoisonTask(fraction=inc, operation=op)
 
-            op = PoisonOp(_op)
-            inc = float(_inc)
+        cursor = modifier.end()
 
-            if m.group("range") is not None:
-                from_ = int(m.group("from")) if m.group("from") is not None else 1
-                to = int(m.group("to")) if m.group("to") is not None else n_rounds
-                rounds = list(range(from_, to + 1))
-                if from_ < 1 or to > n_rounds or from_ > to:
-                    raise IndexError(
-                        f"Invalid range: '{selector}'; round index out of bounds"
-                    )
-            elif m.group("set") is not None:
-                rounds = [
-                    r
-                    for r in rounds
-                    if r in map(int, [int(r) for r in m.group("set_items").split(",")])
-                ]
-            # else: all rounds
-
-            for r in rounds:
-                tasks[r] = PoisonTask(fraction=inc, operation=op)
+    if not 0.0 <= base <= 1.0:
+        raise ValueError(
+            f"Invalid selector: '{selector}'; base fraction must be in [0, 1]"
+        )
 
     return PoisonTask(base), tasks
