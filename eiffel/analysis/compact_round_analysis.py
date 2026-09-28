@@ -142,6 +142,13 @@ def read_compact_run(run: RunSpec) -> tuple[list[dict[str, object]], list[dict[s
                 if recorded_malicious != malicious_clients:
                     malicious_clients = recorded_malicious
 
+            effective_data_poison_fraction = _mean(
+                float(client.attrs["data_poison_effective_fraction"])
+                for client in client_groups
+                if bool(int(client.attrs.get("malicious", 0)))
+                and "data_poison_effective_fraction" in client.attrs
+            )
+
             base = {
                 "attack": mechanism,
                 "run": str(run.path.parent),
@@ -153,6 +160,9 @@ def read_compact_run(run: RunSpec) -> tuple[list[dict[str, object]], list[dict[s
                     malicious_clients / total_clients if total_clients else 0.0
                 ),
                 "attack_multiplier": attack_multiplier,
+                "effective_data_poison_fraction_mean": (
+                    effective_data_poison_fraction
+                ),
             }
 
             perf_row = dict(base)
