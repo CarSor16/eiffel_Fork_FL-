@@ -411,7 +411,20 @@ class EiffelClient(NumPyClient):
         )
 
         return_data: dict[str, Any] = {}
-        class_df = test_set.m["Attack"].astype(str)
+        if "Attack" in test_set.m.columns:
+            class_df = test_set.m["Attack"].astype(str)
+        elif multiclass:
+            class_df = pd.Series(
+                [f"class_{int(value)}" for value in y_true],
+                index=test_set.y.index,
+                dtype="object",
+            )
+        else:
+            class_df = pd.Series(
+                np.where(y_true == 0, "Benign", "Attack"),
+                index=test_set.y.index,
+                dtype="object",
+            )
 
         if multiclass:
             labels = sorted(int(v) for v in np.unique(y_true))
