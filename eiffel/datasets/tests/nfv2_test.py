@@ -31,7 +31,7 @@ def test_load_data():
         mock_df.to_csv(data_path, index=False)
 
         # Test1: load the whole dataset
-        d = load_data(data_path)
+        d = load_data(data_path, seed=1138)
 
         assert isinstance(d, Dataset)
         assert len(d) == len(mock_df)
