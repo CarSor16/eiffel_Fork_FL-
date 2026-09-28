@@ -341,3 +341,29 @@ def test_committed_advanced_profiles_translate(profile_name):
     assert "poisoning/profile=clean" in overrides
     assert any(value.startswith("model_attack=") for value in overrides)
     assert any(value.startswith("model_attack.schedule.type=") for value in overrides)
+
+def test_storage_posthoc_inference_flags_translate():
+    profile = {
+        "experiment": {"num_clients": 2, "rounds": 2},
+        "dataset": {"name": "synthetic_stress", "task": "binary"},
+        "partition": {"type": "iid"},
+        "model": {"name": "stress_mlp"},
+        "attack": {"mechanism": "none", "malicious_fraction": 0.0},
+        "aggregation": {"name": "fedavg"},
+        "storage": {
+            "capture_inference": True,
+            "capture_logits": False,
+            "capture_probe_features": False,
+            "capture_global_inference": False,
+            "probe_size": 64,
+        },
+    }
+
+    overrides = profile_to_overrides(profile)
+
+    assert "storage.capture_inference=true" in overrides
+    assert "storage.capture_logits=false" in overrides
+    assert "storage.capture_probe_features=false" in overrides
+    assert "storage.capture_global_inference=false" in overrides
+    assert "storage.probe_size=64" in overrides
+
