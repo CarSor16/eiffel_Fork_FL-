@@ -292,6 +292,7 @@ class RoundStore:
         attack_active: bool = False,
         mechanism: str = "none",
         data_poison_fraction: float = 0.0,
+        data_poison_effective_fraction: float | None = None,
     ) -> None:
         if self._h5 is None:
             return
@@ -304,6 +305,10 @@ class RoundStore:
         group.attrs["attack_active"] = np.uint8(bool(attack_active))
         group.attrs["mechanism"] = str(mechanism)
         group.attrs["data_poison_fraction"] = np.float32(data_poison_fraction)
+        if data_poison_effective_fraction is not None:
+            group.attrs["data_poison_effective_fraction"] = np.float32(
+                data_poison_effective_fraction
+            )
 
         self._write_layers(
             group, "submitted_update", submitted_update, dtype="float32"
