@@ -1,8 +1,10 @@
 """Tests for the TOML compatibility translation layer."""
 
+from pathlib import Path
+
 import pytest
 
-from eiffel.toml_runner import TomlExperimentError, profile_to_overrides
+from eiffel.toml_runner import TomlExperimentError, load_profile, profile_to_overrides
 
 
 def test_sign_flip_translation():
@@ -316,3 +318,26 @@ def test_optimized_attacks_require_two_benign_clients(mechanism):
 
     with pytest.raises(TomlExperimentError, match="two benign"):
         profile_to_overrides(profile)
+
+
+
+ADVANCED_PROFILE_NAMES = (
+    "synthetic_50k_min_max.toml",
+    "synthetic_50k_min_sum.toml",
+    "synthetic_50k_adaptive_stealth.toml",
+    "synthetic_50k_adaptive_stealth_gradual.toml",
+    "synthetic_50k_heterogeneity_aware_mimicry.toml",
+    "synthetic_50k_targeted_family_poisoning.toml",
+)
+
+
+@pytest.mark.parametrize("profile_name", ADVANCED_PROFILE_NAMES)
+def test_committed_advanced_profiles_translate(profile_name):
+    root = Path(__file__).resolve().parents[3]
+    profile = load_profile(root / "experiments" / "toml" / profile_name)
+    overrides = profile_to_overrides(profile)
+
+    assert "strategy=instrumented_fedavg" in overrides
+    assert "poisoning/profile=clean" in overrides
+    assert any(value.startswith("model_attack=") for value in overrides)
+    assert any(value.startswith("model_attack.schedule.type=") for value in overrides)
