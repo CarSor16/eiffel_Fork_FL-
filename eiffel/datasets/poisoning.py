@@ -130,7 +130,7 @@ def poisoning_fraction_at_round(
     return float(min(1.0, max(0.0, fraction)))
 
 
-def poisoning_is_configured(poison_ins: "PoisonIns" | None) -> bool:
+def poisoning_is_configured(poison_ins: Optional["PoisonIns"]) -> bool:
     """Return whether a PoisonIns ever enables data poisoning."""
     if poison_ins is None:
         return False
