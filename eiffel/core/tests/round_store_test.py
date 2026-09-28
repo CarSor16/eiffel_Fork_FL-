@@ -34,8 +34,11 @@ def test_round_store_persists_reconstructable_state(tmp_path):
             submitted_update=submitted,
             pre_attack_update=pre_attack,
             audit={"l2_norm": 0.5, "cosine_to_mean": -0.2},
-            inference=np.array([[0.2], [0.8]], dtype=np.float32),
+            probabilities=np.array([[0.2], [0.8]], dtype=np.float32),
+            logits=np.array([[-1.3862944], [1.3862944]], dtype=np.float32),
+            probe_features=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
             probe_labels=np.array([0, 1], dtype=np.int64),
+            probe_families=["Benign", "Botnet"],
             malicious=True,
             attack_active=True,
             mechanism="sign_flip",
@@ -56,6 +59,12 @@ def test_round_store_persists_reconstructable_state(tmp_path):
             malicious_clients=1,
         )
         store.save_global(1, global_after)
+        store.save_global_inference(
+            1,
+            "malicious_0",
+            probabilities=np.array([[0.25], [0.75]], dtype=np.float32),
+            logits=np.array([[-1.0986123], [1.0986123]], dtype=np.float32),
+        )
         store.mark_round_complete(1)
 
     assert validate(path) == []
@@ -68,7 +77,16 @@ def test_round_store_persists_reconstructable_state(tmp_path):
         assert bool(client.attrs["attack_active"])
         assert client.attrs["mechanism"] == "sign_flip"
         assert client["inference"].dtype == np.float16
+        assert client["probabilities"].dtype == np.float16
+        assert client["logits"].dtype == np.float16
+        assert client["inference"].id == client["probabilities"].id
+        assert h5["probe"]["features"].dtype == np.float32
         assert h5["probe"]["labels"].dtype == np.int16
+        assert "families" in h5["probe"]
+        assert "global_inference" in h5
+        global_inf = h5["global_inference"]["round_0001"]["malicious_0"]
+        assert global_inf["probabilities"].dtype == np.float16
+        assert global_inf["logits"].dtype == np.float16
         assert (
             client["metrics"]["fit"].attrs["global.accuracy"]
             == np.float32(0.75)
