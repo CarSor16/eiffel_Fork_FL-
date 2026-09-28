@@ -83,7 +83,11 @@ def test_synthetic_client_can_fit_and_evaluate_one_round():
         assert len(parameters) == len(model.get_weights())
         assert "_cid" in metrics
         assert "global" in metrics
-        assert "_eiffel_inference" in metrics
+        assert "_eiffel_probabilities" in metrics
+        assert "_eiffel_logits" in metrics
+        assert "_eiffel_probe_features" in metrics
+        assert "_eiffel_probe_labels" in metrics
+        assert "_eiffel_probe_families" in metrics
         decoded = json.loads(metrics["global"])
         assert 0.0 <= float(decoded["accuracy"]) <= 1.0
         assert "macro_f1" in decoded
