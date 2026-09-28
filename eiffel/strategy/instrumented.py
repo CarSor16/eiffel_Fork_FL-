@@ -396,7 +396,6 @@ class InstrumentedFedAvg(FedAvg):
             ]
             self.store.save_global(int(server_round), self._global_weights)
 
-        self.store.mark_round_complete(int(server_round))
         return aggregated, metrics
 
     def aggregate_evaluate(
@@ -406,11 +405,16 @@ class InstrumentedFedAvg(FedAvg):
         failures,
     ):
         """Persist distributed evaluation metrics before normal FedAvg aggregation."""
-        if not results and failures:
-            details = _failure_summary(list(failures))
+        if not results:
+            if failures:
+                details = _failure_summary(list(failures))
+                raise RuntimeError(
+                    f"All clients failed during evaluation in round {server_round}. "
+                    f"Flower reported {len(failures)} failure(s). {details}"
+                )
             raise RuntimeError(
-                f"All clients failed during evaluation in round {server_round}. "
-                f"Flower reported {len(failures)} failure(s). {details}"
+                f"Round {server_round} produced no evaluation results and no "
+                "explicit Flower failures. Refusing to mark the round complete."
             )
         if failures:
             details = _failure_summary(list(failures))
@@ -445,6 +449,12 @@ class InstrumentedFedAvg(FedAvg):
                     probabilities=probs,
                     logits=logit_values,
                 )
-        if results and self.store.flush_each_round:
-            self.store.flush()
-        return super().aggregate_evaluate(server_round, results, failures)
+        aggregated = super().aggregate_evaluate(
+            server_round,
+            results,
+            failures,
+        )
+        # A round is complete only after both fit aggregation and distributed
+        # evaluation (including persisted global inference) have succeeded.
+        self.store.mark_round_complete(int(server_round))
+        return aggregated
