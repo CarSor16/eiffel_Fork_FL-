@@ -160,3 +160,66 @@ def test_compact_analysis_writes_two_plots_per_run_and_attack_context(tmp_path):
     assert np.isnan(float(updates[0]["malicious_transform_l2_mean"]))
     assert float(updates[1]["malicious_transform_l2_mean"]) > 0.0
     assert float(updates[1]["malicious_to_benign_l2_ratio"]) > 0.0
+
+def test_compact_analysis_exposes_effective_label_poisoning(tmp_path):
+    path = tmp_path / "outputs" / "label-flip" / "round_state.h5"
+    path.parent.mkdir(parents=True)
+    weights = [np.array([1.0, -1.0], dtype=np.float32)]
+    update = [np.array([0.1, -0.05], dtype=np.float32)]
+
+    with RoundStore(path) as store:
+        store.save_global(0, weights)
+        store.save_client(
+            1,
+            "pool_benign_0",
+            submitted_update=update,
+            malicious=False,
+            attack_active=False,
+            mechanism="none",
+        )
+        store.save_client(
+            1,
+            "pool_malicious_0",
+            submitted_update=update,
+            malicious=True,
+            attack_active=True,
+            mechanism="label_flip",
+            data_poison_fraction=0.5,
+            data_poison_effective_fraction=0.25,
+        )
+        for cid in ("pool_benign_0", "pool_malicious_0"):
+            store.save_client_metrics(
+                1,
+                cid,
+                {
+                    "global": {
+                        "accuracy": 0.8,
+                        "macro_f1": 0.75,
+                        "macro_attack_recall": 0.7,
+                        "min_attack_recall": 0.65,
+                    }
+                },
+                phase="evaluate",
+            )
+        store.save_round_metadata(
+            1,
+            attack_mechanism="label_flip",
+            attack_multiplier=0.5,
+            malicious_clients=1,
+        )
+        store.save_global(1, weights)
+        store.mark_round_complete(1)
+
+    output = tmp_path / "analysis"
+    analyse_compact([RunSpec("label_flip", path)], output)
+    run_dir = next(item for item in output.iterdir() if item.is_dir())
+    with (run_dir / "round_performance.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert len(rows) == 1
+    assert int(rows[0]["active_malicious_clients"]) == 1
+    assert float(rows[0]["attack_multiplier"]) == 0.5
+    assert float(rows[0]["effective_data_poison_fraction_mean"]) == 0.25
+
