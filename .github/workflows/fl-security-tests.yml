@@ -37,6 +37,7 @@ jobs:
           python -m pytest -q -s
           eiffel/core/tests/synthetic_client_integration_test.py
           eiffel/core/tests/synthetic_flower_integration_test.py
+          eiffel/core/tests/advanced_attacks_integration_test.py
 
       - name: Focused FL-security suite
         run: >
