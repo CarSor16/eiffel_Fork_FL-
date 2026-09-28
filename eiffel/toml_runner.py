@@ -65,6 +65,21 @@ MODEL_ATTACKS = {
     "lie": "lie",
     "gradient_mimicry": "gradient_mimicry",
     "colluding_sign_flip": "colluding_sign_flip",
+    "min_max": "min_max",
+    "min_sum": "min_sum",
+    "adaptive_stealth": "adaptive_stealth",
+    "heterogeneity_aware_mimicry": "heterogeneity_aware_mimicry",
+    "heterogeneity_mimicry": "heterogeneity_aware_mimicry",
+    "targeted_family_poisoning": "targeted_family_poisoning",
+}
+
+ATTACK_PARAMETER_TABLES = {
+    "min_max": "min_max",
+    "min_sum": "min_sum",
+    "adaptive_stealth": "adaptive",
+    "heterogeneity_aware_mimicry": "heterogeneity",
+    "heterogeneity_mimicry": "heterogeneity",
+    "targeted_family_poisoning": "targeted",
 }
 
 
@@ -137,6 +152,25 @@ def _dataset_group(dataset: Mapping[str, Any]) -> str:
             + ", ".join(sorted(DATASETS))
             + ". You can also set dataset.hydra_group explicitly."
         ) from exc
+
+
+def _attack_parameters(
+    attack: Mapping[str, Any],
+    mechanism: str,
+) -> dict[str, Any]:
+    """Merge mechanism-specific TOML subtable over the common attack table."""
+    merged = dict(attack)
+    table_name = ATTACK_PARAMETER_TABLES.get(mechanism)
+    if table_name:
+        nested = attack.get(table_name, {})
+        if nested is None:
+            nested = {}
+        if not isinstance(nested, Mapping):
+            raise TomlExperimentError(
+                f"[attack.{table_name}] must be a TOML table."
+            )
+        merged.update(nested)
+    return merged
 
 
 def _schedule_table(attack: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -274,6 +308,7 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         )
 
     mechanism = str(attack.get("mechanism", "none")).lower()
+    attack_params = _attack_parameters(attack, mechanism)
     attackers = _malicious_count(total_clients, attack)
     if attackers >= total_clients:
         raise TomlExperimentError(
@@ -472,27 +507,80 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
 
     overrides.append(f"model_attack={attack_group}")
 
+    if attack_group != "none" and attackers <= 0:
+        raise TomlExperimentError(
+            f"{mechanism} requires at least one malicious client."
+        )
+    if attack_group in {"min_max", "min_sum", "adaptive_stealth"} and benign < 2:
+        raise TomlExperimentError(
+            f"{mechanism} requires at least two benign clients."
+        )
+    if attack_group == "targeted_family_poisoning":
+        target_family = str(attack_params.get("target_family", "")).strip()
+        if not target_family:
+            raise TomlExperimentError(
+                "targeted_family_poisoning requires "
+                "[attack.targeted].target_family (or attack.target_family)."
+            )
+        if storage.get("capture_inference", True) is False:
+            raise TomlExperimentError(
+                "targeted_family_poisoning requires storage.capture_inference=true."
+            )
+        overrides.append("storage.capture_inference=true")
+
     if attack_group != "none":
         # Keep the malicious clients' local data clean for pure model poisoning.
         overrides.append("poisoning/profile=clean")
 
-    if "strength" in attack:
+    if "strength" in attack_params:
         if attack_group == "scaling":
             overrides.append(
-                f"model_attack.scale_factor={float(attack['strength'])}"
+                f"model_attack.scale_factor={float(attack_params['strength'])}"
             )
         else:
-            overrides.append(f"model_attack.strength={float(attack['strength'])}")
-    if "scale_factor" in attack:
-        overrides.append(f"model_attack.scale_factor={float(attack['scale_factor'])}")
-    if "noise_std" in attack:
-        overrides.append(f"model_attack.noise_std={float(attack['noise_std'])}")
-    if "lie_z" in attack:
-        overrides.append(f"model_attack.lie_z={float(attack['lie_z'])}")
-    if "mimicry_lambda" in attack:
+            overrides.append(
+                f"model_attack.strength={float(attack_params['strength'])}"
+            )
+    if "scale_factor" in attack_params:
         overrides.append(
-            f"model_attack.mimicry_lambda={float(attack['mimicry_lambda'])}"
+            f"model_attack.scale_factor={float(attack_params['scale_factor'])}"
         )
+    if "noise_std" in attack_params:
+        overrides.append(
+            f"model_attack.noise_std={float(attack_params['noise_std'])}"
+        )
+    if "lie_z" in attack_params:
+        overrides.append(
+            f"model_attack.lie_z={float(attack_params['lie_z'])}"
+        )
+    if "mimicry_lambda" in attack_params:
+        overrides.append(
+            "model_attack.mimicry_lambda="
+            f"{float(attack_params['mimicry_lambda'])}"
+        )
+
+    advanced_keys = (
+        "direction",
+        "search_steps",
+        "max_lambda",
+        "constraint_margin",
+        "l2_quantile",
+        "distance_quantile",
+        "min_cosine_quantile",
+        "stealth_margin",
+        "cosine_slack",
+        "max_strength",
+        "neighbors",
+        "similarity",
+        "target_family",
+        "target_amplification",
+        "target_mimicry_lambda",
+    )
+    for key in advanced_keys:
+        if key in attack_params:
+            overrides.append(
+                f"++model_attack.{key}={_quote_hydra(attack_params[key])}"
+            )
 
     schedule = _schedule_table(attack)
     schedule_type, start_round, end_round = _validate_schedule(
