@@ -165,12 +165,24 @@ class EiffelClient(NumPyClient):
 
         probe_x = test_set.X.iloc[:probe_size].to_numpy()
         probe_y = test_set.y.iloc[:probe_size].to_numpy()
-        probabilities, logits = predict_probabilities_and_logits(
-            self.model,
-            probe_x,
-            batch_size=int(config["batch_size"]),
-            verbose=0,
-        )
+        capture_logits = bool(config.get("capture_logits", True))
+        if capture_logits:
+            probabilities, logits = predict_probabilities_and_logits(
+                self.model,
+                probe_x,
+                batch_size=int(config["batch_size"]),
+                verbose=0,
+            )
+        else:
+            probabilities = np.asarray(
+                self.model.predict(
+                    probe_x,
+                    batch_size=int(config["batch_size"]),
+                    verbose=0,
+                ),
+                dtype=np.float32,
+            )
+            logits = None
 
         payload: dict[str, str] = {
             "_eiffel_probabilities": encode_array(
@@ -182,7 +194,7 @@ class EiffelClient(NumPyClient):
                 dtype="int16",
             ),
         }
-        if bool(config.get("capture_logits", True)):
+        if logits is not None:
             payload["_eiffel_logits"] = encode_array(logits, dtype="float16")
         if bool(config.get("capture_probe_features", True)):
             payload["_eiffel_probe_features"] = encode_array(
