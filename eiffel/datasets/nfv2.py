@@ -166,14 +166,35 @@ class NFV2Dataset(Dataset):
         n = min(n, sum(target))
         idx = d.y[target].sample(n=n, random_state=seed).index.to_list()
 
-        # Apply the label flip while preserving the boolean NF-V2 label dtype.
-        # Assigning integer 0/1 values into a bool Series raises a pandas FutureWarning
-        # and will become an error in a future pandas release.
-        d.y.loc[idx] = ~d.y.loc[idx].astype(bool)
-        if op == PoisonOp.DEC:
-            d.m.loc[idx, "Poisoned"] = False
-        else:
-            d.m.loc[idx, "Poisoned"] = True
+        # A clean (ratio=0) profile must be a true no-op.  Assigning an empty
+        # boolean Series into an integer label Series can coerce pandas to object
+        # dtype, which later makes TensorFlow reject the labels.
+        if idx:
+            selected = d.y.loc[idx]
+            if pd.api.types.is_bool_dtype(d.y.dtype):
+                flipped = ~selected.astype(bool)
+            elif pd.api.types.is_integer_dtype(d.y.dtype):
+                values = selected.to_numpy()
+                if not np.all(np.isin(values, [0, 1])):
+                    raise ValueError(
+                        "NFV2Dataset.poison only supports binary integer labels 0/1."
+                    )
+                flipped = pd.Series(
+                    1 - values.astype(np.int64),
+                    index=selected.index,
+                    dtype=d.y.dtype,
+                )
+            else:
+                raise TypeError(
+                    "NFV2Dataset.poison requires boolean or integer binary labels; "
+                    f"got dtype {d.y.dtype}."
+                )
+            d.y.loc[idx] = flipped
+
+            if op == PoisonOp.DEC:
+                d.m.loc[idx, "Poisoned"] = False
+            else:
+                d.m.loc[idx, "Poisoned"] = True
 
         # save
         self.X = d.X
