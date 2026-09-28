@@ -41,6 +41,7 @@ jobs:
       - name: Focused FL-security suite
         run: >
           python -m pytest -q
+          eiffel/core/tests/client_test.py
           eiffel/core/tests/model_attacks_test.py
           eiffel/core/tests/label_flip_attack_test.py
           eiffel/core/tests/multiclass_models_test.py
