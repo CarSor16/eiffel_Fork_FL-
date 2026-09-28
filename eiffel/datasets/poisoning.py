@@ -95,6 +95,53 @@ class PoisonIns:
             )
 
 
+def poisoning_fraction_at_round(
+    poison_ins: "PoisonIns",
+    server_round: int | None,
+) -> float:
+    """Return the configured poisoned fraction active at a communication round.
+
+    The value is relative to the selected poisoning target (whole dataset for
+    untargeted attacks, target families for targeted attacks).  It reconstructs
+    Eiffel's stateful selector from the base fraction plus all tasks up to the
+    requested round, so it works even when the client object itself is ephemeral.
+    """
+    fraction = float(poison_ins.base.fraction)
+    if server_round is None:
+        return fraction
+
+    for round_number, task in sorted((poison_ins.tasks or {}).items()):
+        if int(round_number) > int(server_round):
+            break
+        if task.operation == PoisonOp.INC:
+            fraction += float(task.fraction)
+        elif task.operation == PoisonOp.DEC:
+            fraction -= float(task.fraction)
+        else:  # pragma: no cover - PoisonOp currently has only INC/DEC
+            raise ValueError(f"Unsupported poisoning operation: {task.operation}")
+
+    # Tiny decimal artefacts can arise from gradual schedules.  Values materially
+    # outside [0, 1] are configuration errors and should not be hidden.
+    if fraction < -1e-9 or fraction > 1.0 + 1e-9:
+        raise ValueError(
+            f"Poisoning profile resolves to invalid fraction {fraction} "
+            f"at round {server_round}."
+        )
+    return float(min(1.0, max(0.0, fraction)))
+
+
+def poisoning_is_configured(poison_ins: "PoisonIns" | None) -> bool:
+    """Return whether a PoisonIns ever enables data poisoning."""
+    if poison_ins is None:
+        return False
+    if float(poison_ins.base.fraction) > 0.0:
+        return True
+    return any(
+        task.operation == PoisonOp.INC and float(task.fraction) > 0.0
+        for task in (poison_ins.tasks or {}).values()
+    )
+
+
 def parse_poisoning_selector(
     selector: str, n_rounds: int
 ) -> Tuple[PoisonTask, Optional[PoisonTasks]]:
