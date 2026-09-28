@@ -193,13 +193,17 @@ class EiffelClient(NumPyClient):
     seed : Optional[int]
         The seed to use for random number generation.
     poison_ins : Optional[PoisonIns]
-        The poisoning instructions, if any.
+        The data-poisoning instructions, if any.
+    is_malicious : bool
+        Explicit security role. This is independent from data poisoning so pure
+        model-poisoning clients do not need fake PoisonIns instructions.
     """
 
     cid: EiffelCID
     data_holder: DatasetHandle
     model: keras.Model
     poison_ins: Optional[PoisonIns]
+    is_malicious: bool
 
     def __init__(
         self,
@@ -210,6 +214,7 @@ class EiffelClient(NumPyClient):
         verbose: VerbLevel = VerbLevel.SILENT,
         seed: int,
         poison_ins: Optional[PoisonIns] = None,
+        is_malicious: bool | None = None,
         eval_fit: bool = True,
     ) -> None:
         """Initialize the EiffelClient."""
@@ -219,6 +224,16 @@ class EiffelClient(NumPyClient):
         self.verbose = verbose
         self.seed = seed
         self.poison_ins = poison_ins
+        if is_malicious is False and poison_ins is not None:
+            raise ValueError(
+                "A client with data-poisoning instructions cannot be explicitly "
+                "marked benign."
+            )
+        self.is_malicious = (
+            bool(poison_ins is not None)
+            if is_malicious is None
+            else bool(is_malicious)
+        )
         self.eval_fit = eval_fit
         set_seed(seed)
 
@@ -336,7 +351,7 @@ class EiffelClient(NumPyClient):
 
         ret = {
             "_cid": self.cid,
-            "_eiffel_malicious": bool(self.poison_ins is not None),
+            "_eiffel_malicious": self.is_malicious,
         }
 
         # Capture a compact deterministic probe. Flower metrics only accept scalar
@@ -566,7 +581,11 @@ class EiffelClient(NumPyClient):
 
 def mk_client(
     cid: EiffelCID,
-    mappings: dict[EiffelCID, tuple[ray.ObjectRef, Optional[PoisonIns], keras.Model]],
+    mappings: dict[
+        EiffelCID,
+        tuple[ray.ObjectRef, Optional[PoisonIns], keras.Model]
+        | tuple[ray.ObjectRef, Optional[PoisonIns], keras.Model, bool],
+    ],
     seed: int,
 ) -> NumPyClient:
     """Return a Flower 1.5-compatible NumPyClient based on its CID.
@@ -578,7 +597,14 @@ def mk_client(
     if cid not in mappings:
         raise ValueError(f"Client `{cid}` not found in mappings.")
 
-    handle, attack, model_fn = mappings[cid]
+    mapping = mappings[cid]
+    if len(mapping) == 4:
+        handle, attack, model_fn, is_malicious = mapping
+    else:
+        # Backward compatibility for callers that still provide the historical
+        # (handle, poison_ins, model_fn) tuple.
+        handle, attack, model_fn = mapping
+        is_malicious = bool(attack is not None) or "malicious" in str(cid)
 
     return EiffelClient(
         cid,
@@ -586,6 +612,7 @@ def mk_client(
         model_fn(ray.get(handle.get.remote("train")).X.shape[1]),
         seed=seed,
         poison_ins=attack,
+        is_malicious=is_malicious,
     )
 
 
