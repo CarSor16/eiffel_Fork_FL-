@@ -1,10 +1,12 @@
 """Small end-to-end client smoke test for the synthetic FL-NIDS path."""
 
 import json
+from functools import partial
 
 import ray
 
 from eiffel.core.client import EiffelClient
+from eiffel.core.pool import Pool
 from eiffel.datasets.dataset import DatasetHandle
 from eiffel.datasets.synthetic_stress import load_data
 from eiffel.models.advanced import mk_stress_mlp
@@ -93,5 +95,58 @@ def test_synthetic_client_can_fit_and_evaluate_one_round():
         assert 0.0 <= float(decoded["accuracy"]) <= 1.0
         assert "macro_f1" in decoded
         assert "mcc" in decoded
+
+        # A model-poisoning client is malicious because of its security role, not
+        # because it carries data-poisoning instructions.
+        attacker_model = mk_stress_mlp(
+            8,
+            hidden1=16,
+            hidden2=8,
+            learning_rate=0.001,
+        )
+        attacker = EiffelClient(
+            "opaque_client_id",
+            holder,
+            attacker_model,
+            seed=2026,
+            poison_ins=None,
+            is_malicious=True,
+        )
+        _, attacker_examples, attacker_metrics = attacker.fit(
+            attacker_model.get_weights(),
+            {
+                "batch_size": 32,
+                "num_epochs": 1,
+                "round": 1,
+                "capture_inference": False,
+            },
+        )
+        assert attacker_examples == 128
+        assert attacker.poison_ins is None
+        assert attacker.is_malicious is True
+        assert attacker_metrics["_eiffel_malicious"] is True
+
+        # Pools can likewise declare malicious clients without requiring a fake
+        # PoisonIns object. The generated client mapping carries the role explicitly.
+        pool = Pool(
+            dataset=dataset,
+            model_fn=partial(
+                mk_stress_mlp,
+                hidden1=16,
+                hidden2=8,
+                learning_rate=0.001,
+            ),
+            n_benign=1,
+            n_malicious=1,
+            attack=None,
+            seed=2026,
+        )
+        pool.deploy()
+        mappings = pool.gen_mappings()
+        malicious_entries = [
+            entry for entry in mappings.values() if bool(entry[3])
+        ]
+        assert len(malicious_entries) == 1
+        assert malicious_entries[0][1] is None
     finally:
         ray.shutdown()
