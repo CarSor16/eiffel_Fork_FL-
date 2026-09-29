@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import copy
+import csv
 import math
 import subprocess
 import sys
 from pathlib import Path
 
 import h5py
+import numpy as np
 import pytest
 
+from eiffel.analysis.compact_round_analysis import analyse_compact
+from eiffel.analysis.compare_metrics import RunSpec
 from eiffel.analysis.validate_round_state import validate
 from eiffel.toml_runner import load_profile, profile_to_overrides
 
@@ -39,6 +43,8 @@ RAY_STARTUP_TIMEOUT_MARKERS = (
 
 def _run_with_ray_startup_retry(
     command: list[str],
+    *,
+    timeout: int = 240,
 ) -> subprocess.CompletedProcess[str]:
     """Retry once only when Ray itself fails to start locally."""
     completed = None
@@ -49,7 +55,7 @@ def _run_with_ray_startup_retry(
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            timeout=240,
+            timeout=timeout,
         )
         if completed.returncode == 0:
             return completed
@@ -103,6 +109,34 @@ def _scale_for_application_smoke(profile: dict) -> dict:
         schedule["off_rounds"] = 1
     elif kind == "gradual":
         schedule["ramp_rounds"] = 2
+
+    return profile
+
+
+def _scale_for_ten_round_longitudinal(profile: dict) -> dict:
+    """Keep a representative E2E run light while preserving 10 FL rounds."""
+    profile = copy.deepcopy(profile)
+    profile.setdefault("experiment", {})["num_clients"] = 10
+    profile["experiment"]["rounds"] = 10
+
+    dataset = profile.setdefault("dataset", {})
+    dataset["samples_per_client"] = 128
+    dataset["central_test_size"] = 512
+
+    training = profile.setdefault("training", {})
+    training["local_epochs"] = 1
+    training["batch_size"] = min(int(training.get("batch_size", 64)), 64)
+
+    storage = profile.setdefault("storage", {})
+    storage["enabled"] = True
+    storage["compression_level"] = 1
+    storage["flush_each_round"] = True
+    storage["capture_inference"] = True
+    storage["probe_size"] = min(int(storage.get("probe_size", 128)), 128)
+
+    attack = profile.setdefault("attack", {})
+    schedule = attack.setdefault("schedule", {})
+    schedule["type"] = "continuous"
 
     return profile
 
@@ -196,3 +230,115 @@ def test_current_toml_attack_profile_runs_end_to_end(
         round_meta = h5["rounds"]["round_0002"].attrs
         malicious_count = int(round_meta.get("malicious_clients", 0))
         assert malicious_count == expected_attackers
+
+
+
+def test_sign_flip_runs_for_ten_rounds_with_longitudinal_outputs(
+    tmp_path: Path,
+):
+    """Run one representative attack for long enough to test round evolution."""
+    source_path = PROFILE_DIR / "synthetic_50k_sign_flip.toml"
+    assert source_path.exists(), source_path
+
+    profile = _scale_for_ten_round_longitudinal(load_profile(source_path))
+    expected_attackers = _expected_attackers(profile)
+    assert expected_attackers == 1
+
+    run_dir = tmp_path / "sign_flip_10_rounds"
+    command = [
+        sys.executable,
+        "-m",
+        "eiffel",
+        *profile_to_overrides(profile),
+        f"hydra.run.dir={run_dir.as_posix()}",
+        "hydra.output_subdir=.hydra",
+    ]
+
+    completed = _run_with_ray_startup_retry(command, timeout=600)
+    assert completed.returncode == 0, (
+        "10-round sign-flip run failed through TOML -> Hydra -> Flower:\n"
+        f"{completed.stdout}"
+    )
+
+    h5_path = run_dir / str(profile["storage"].get("path", "round_state.h5"))
+    assert h5_path.exists(), completed.stdout
+
+    validation_errors = validate(h5_path)
+    assert not validation_errors, (
+        "10-round sign-flip run produced an invalid round store:\n"
+        + "\n".join(validation_errors)
+    )
+
+    with h5py.File(h5_path, "r") as h5:
+        assert int(h5["meta"].attrs["last_complete_round"]) == 10
+        assert set(h5["clients"].keys()) == {
+            f"round_{round_number:04d}" for round_number in range(1, 11)
+        }
+        assert set(h5["rounds"].keys()) == {
+            f"round_{round_number:04d}" for round_number in range(1, 11)
+        }
+        assert set(h5["global"].keys()) == {
+            f"round_{round_number:04d}" for round_number in range(0, 11)
+        }
+
+        for round_number in range(1, 11):
+            round_name = f"round_{round_number:04d}"
+            clients = h5["clients"][round_name]
+            assert len(clients) == 10
+
+            malicious = [
+                client
+                for client in clients.values()
+                if bool(int(client.attrs.get("malicious", 0)))
+            ]
+            assert len(malicious) == expected_attackers
+            assert all(
+                bool(int(client.attrs.get("attack_active", 0)))
+                for client in malicious
+            )
+            assert all("pre_attack_update" in client for client in malicious)
+
+            for client in clients.values():
+                for dataset in client["submitted_update"].values():
+                    assert np.isfinite(np.asarray(dataset)).all()
+
+            round_meta = h5["rounds"][round_name].attrs
+            assert int(round_meta.get("malicious_clients", 0)) == expected_attackers
+            assert float(round_meta.get("attack_multiplier", 0.0)) > 0.0
+
+    analysis_dir = tmp_path / "sign_flip_10_round_analysis"
+    rc = analyse_compact(
+        [RunSpec("sign_flip_10_rounds", h5_path)],
+        analysis_dir,
+    )
+    assert rc == 0
+
+    run_outputs = [path for path in analysis_dir.iterdir() if path.is_dir()]
+    assert len(run_outputs) == 1
+    run_output = run_outputs[0]
+
+    with (run_output / "round_performance.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        performance_rows = list(csv.DictReader(handle))
+    with (run_output / "round_updates.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        update_rows = list(csv.DictReader(handle))
+
+    assert [int(row["round"]) for row in performance_rows] == list(range(1, 11))
+    assert [int(row["round"]) for row in update_rows] == list(range(1, 11))
+    assert all(int(row["active_malicious_clients"]) == 1 for row in performance_rows)
+    assert all(math.isfinite(float(row["accuracy"])) for row in performance_rows)
+    assert all(math.isfinite(float(row["macro_f1"])) for row in performance_rows)
+
+    transform_l2 = [
+        float(row["malicious_transform_l2_mean"]) for row in update_rows
+    ]
+    assert all(math.isfinite(value) for value in transform_l2)
+    assert any(value > 0.0 for value in transform_l2)
+
+    for plot_name in ("performance_by_round.png", "updates_by_round.png"):
+        plot = run_output / plot_name
+        assert plot.exists()
+        assert plot.stat().st_size > 0
