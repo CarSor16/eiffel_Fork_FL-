@@ -259,6 +259,7 @@ class Experiment:
             (ray_kwargs or {})
             | {
                 "ignore_reinit_error": True,
+                "include_dashboard": False,
                 "num_gpus": len(tf.config.list_physical_devices("GPU")),
             }
             # | {"local_mode": True}  # in debugger
