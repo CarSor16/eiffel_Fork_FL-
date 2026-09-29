@@ -81,6 +81,7 @@ class Experiment:
         server: Server | None = None,
         partitioner: Partitioner | DictConfig | None = None,
         storage: dict | DictConfig | None = None,
+        max_concurrent_clients: int | None = None,
     ):
         """Initialize the experiment.
 
@@ -203,6 +204,12 @@ class Experiment:
             self.pools.append(pool)
 
         self.n_clients = sum([len(p) for p in self.pools])
+        if max_concurrent_clients is None:
+            self.n_concurrent = self.n_clients
+        else:
+            if int(max_concurrent_clients) < 1:
+                raise ConfigError("max_concurrent_clients must be >= 1")
+            self.n_concurrent = min(self.n_clients, int(max_concurrent_clients))
 
         if strategy is None:
             strategy = FedAvg()
@@ -268,6 +275,11 @@ class Experiment:
         )
 
         ray.init(**init_kwargs)
+        logger.info(
+            "Ray client concurrency: at most %s/%s clients at once.",
+            self.n_concurrent,
+            self.n_clients,
+        )
 
         try:
             for pool in self.pools:
@@ -286,7 +298,7 @@ class Experiment:
                 num_clients=self.n_clients,
                 config=ServerConfig(num_rounds=self.n_rounds),
                 strategy=self.strategy,
-                client_resources=compute_client_resources(self.n_clients),
+                client_resources=compute_client_resources(self.n_concurrent),
                 actor_kwargs={"on_actor_init_fn": mk_client_init_fn(seed=self.seed)},
                 clients_ids=reduce(lambda a, b: a + b, [p.ids for p in self.pools]),
                 server=self.server,
