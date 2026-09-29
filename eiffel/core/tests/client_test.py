@@ -20,6 +20,7 @@ def _synthetic_holder():
         central_test_size=64,
         num_features=8,
         num_classes=2,
+        rare_class_id=1,
         latent_dim=4,
         informative_features=6,
         redundant_features=2,
