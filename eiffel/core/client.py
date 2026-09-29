@@ -1,5 +1,6 @@
 """Eiffel client API."""
 
+import gc
 import itertools
 import json
 import logging
@@ -642,6 +643,12 @@ def mk_client(
         # (handle, poison_ins, model_fn) tuple.
         handle, attack, model_fn = mapping
         is_malicious = bool(attack is not None) or "malicious" in str(cid)
+
+    # Flower reuses Ray actors across jobs/rounds. Keras models created by previous
+    # jobs can otherwise leave graph/session state behind in the long-lived worker
+    # process and cause memory growth during long simulations.
+    keras.backend.clear_session()
+    gc.collect()
 
     return EiffelClient(
         cid,
