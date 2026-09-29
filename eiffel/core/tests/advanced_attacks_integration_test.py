@@ -12,6 +12,41 @@ from omegaconf import OmegaConf
 from eiffel.toml_runner import build_command
 
 
+RAY_STARTUP_TIMEOUT_MARKERS = (
+    "Timed out after 60 seconds while waiting for node to startup",
+    "The current node timed out during startup",
+)
+
+
+def _run_eiffel_with_ray_startup_retry(
+    command: list[str],
+    *,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    """Run Eiffel, retrying once only for Ray's transient local startup timeout."""
+    attempts = 2
+    completed = None
+    for attempt in range(attempts):
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=180,
+        )
+        if completed.returncode == 0:
+            return completed
+        ray_startup_timeout = any(
+            marker in completed.stdout
+            for marker in RAY_STARTUP_TIMEOUT_MARKERS
+        )
+        if not ray_startup_timeout or attempt == attempts - 1:
+            return completed
+    assert completed is not None  # pragma: no cover
+    return completed
+
+
 def _profile_text(mechanism: str) -> str:
     if mechanism == "min_max":
         attack = """
@@ -264,13 +299,9 @@ def test_advanced_attack_runs_through_toml_hydra_flower_and_hdf5(
             "hydra.output_subdir=.hydra",
         ],
     )
-    completed = subprocess.run(
+    completed = _run_eiffel_with_ray_startup_retry(
         command,
         cwd=Path(__file__).resolve().parents[3],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=180,
     )
     assert completed.returncode == 0, completed.stdout
 
@@ -331,13 +362,9 @@ def test_label_flip_schedule_is_persisted_end_to_end(tmp_path: Path):
             "hydra.output_subdir=.hydra",
         ],
     )
-    completed = subprocess.run(
+    completed = _run_eiffel_with_ray_startup_retry(
         command,
         cwd=Path(__file__).resolve().parents[3],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=180,
     )
     assert completed.returncode == 0, completed.stdout
 
@@ -404,13 +431,9 @@ def test_targeted_label_flip_without_local_target_is_not_marked_active(
             "hydra.output_subdir=.hydra",
         ],
     )
-    completed = subprocess.run(
+    completed = _run_eiffel_with_ray_startup_retry(
         command,
         cwd=Path(__file__).resolve().parents[3],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=180,
     )
     assert completed.returncode == 0, completed.stdout
 
