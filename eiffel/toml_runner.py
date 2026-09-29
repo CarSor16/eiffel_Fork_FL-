@@ -124,6 +124,12 @@ def _quote_hydra(value: Any) -> str:
     return text
 
 
+def _quote_hydra_string(value: Any) -> str:
+    """Force a Hydra override value to remain a string."""
+    text = str(value)
+    return "'" + text.replace("'", "\\'") + "'"
+
+
 def _malicious_count(total_clients: int, attack: Mapping[str, Any]) -> int:
     ids = str(attack.get("malicious_client_ids", "")).strip()
     if ids:
@@ -480,7 +486,7 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         schedule = _schedule_table(attack)
         profile = _label_flip_profile(poison_rate, schedule, rounds=rounds)
         overrides.append(
-            f"attacks.0.profile={_quote_hydra(profile)}"
+            f"attacks.0.profile={_quote_hydra_string(profile)}"
         )
         objective = str(attack.get("objective", "untargeted")).lower()
         target = attack.get("target")
