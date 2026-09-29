@@ -429,3 +429,35 @@ def test_label_flip_temporal_selector_is_hydra_quoted():
     overrides = profile_to_overrides(profile)
 
     assert "attacks.0.profile='0.0+0.5{2}-0.5{3}'" in overrides
+
+@pytest.mark.parametrize(
+    ("poison_rate", "expected"),
+    [
+        (0.0, "attacks.0.profile='0.0'"),
+        (0.5, "attacks.0.profile='0.5'"),
+        (1.0, "attacks.0.profile='1'"),
+    ],
+)
+def test_label_flip_scalar_selector_is_always_hydra_string(
+    poison_rate,
+    expected,
+):
+    profile = {
+        "experiment": {"num_clients": 4, "rounds": 3},
+        "dataset": {"name": "synthetic_stress", "task": "binary"},
+        "partition": {"type": "iid"},
+        "model": {"name": "stress_mlp"},
+        "attack": {
+            "mechanism": "label_flip",
+            "malicious_fraction": 0.25,
+            "poison_rate": poison_rate,
+            "objective": "untargeted",
+            "schedule": {"type": "continuous"},
+        },
+        "aggregation": {"name": "fedavg"},
+    }
+
+    overrides = profile_to_overrides(profile)
+
+    assert expected in overrides
+
