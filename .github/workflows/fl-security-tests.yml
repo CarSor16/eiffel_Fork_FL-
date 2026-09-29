@@ -38,6 +38,12 @@ jobs:
           eiffel/core/tests/synthetic_flower_integration_test.py
           eiffel/core/tests/advanced_attacks_integration_test.py
 
+      - name: Current TOML attack profiles E2E
+        if: runner.os == 'Linux'
+        run: >
+          python -m pytest -q -s
+          eiffel/core/tests/current_profiles_integration_test.py
+
       - name: Focused FL-security suite
         run: >
           python -m pytest -q
