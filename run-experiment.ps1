@@ -17,6 +17,7 @@ param(
     [string]$RunsRoot = "outputs",
     [string]$AnalysisOutput = "analysis-results",
     [string]$ValidateHdf5 = "",
+    [int]$MaxConcurrentClients = 0,
 
     [ValidateSet("none", "synthetic50k", "multiclass", "advanced")]
     [string]$Suite = "none",
@@ -74,6 +75,9 @@ function Invoke-Profile([string]$Path, [switch]$ValidateOnly) {
     $Args = @("-m", "eiffel.toml_runner", $Path)
     if ($ValidateOnly) {
         $Args += "--dry-run"
+    }
+    if ($MaxConcurrentClients -gt 0) {
+        $Args += "++experiment.max_concurrent_clients=$MaxConcurrentClients"
     }
     if ($HydraOverrides) {
         $Args += $HydraOverrides
@@ -191,6 +195,10 @@ if ($List) {
 if ($Attacks) {
     Show-AttackHelp
     exit 0
+}
+
+if ($MaxConcurrentClients -lt 0) {
+    throw "-MaxConcurrentClients must be 0 (automatic) or >= 1."
 }
 
 Require-Environment
