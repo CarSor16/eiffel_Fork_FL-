@@ -1177,3 +1177,10 @@ TOML is the stable user-facing experiment description, while Hydra remains usefu
 configuration groups, command-line overrides, reproducibility, output directories and
 future sweeps. A normal named TOML experiment can still receive a temporary Hydra
 override from .\run.cmd without changing the committed profile.
+
+
+---
+
+## University data-center runs
+
+Full real-dataset campaigns for **NF-CSE-CIC-IDS2018-v2** and **NF-UNSW-NB15-v2** are prepared under the `dc_cicids_*` and `dc_nb15_*` TOML profiles. Linux setup, dataset environment variables, SLURM templates, multi-seed submission and validation are documented in [docs/DATACENTER_RUNBOOK.md](docs/DATACENTER_RUNBOOK.md).
