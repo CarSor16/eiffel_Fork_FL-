@@ -486,3 +486,34 @@ def test_full_and_datacenter_dataset_aliases(name, expected):
     assert expected in overrides
     assert "partitioner=dirichlet" in overrides
     assert "partitioner.alpha=0.5" in overrides
+
+
+DATACENTER_PROFILE_NAMES = tuple(
+    f"dc_{dataset}_{attack}.toml"
+    for dataset in ("cicids", "nb15")
+    for attack in (
+        "clean",
+        "label_flip_targeted",
+        "sign_flip",
+        "model_scaling",
+        "gaussian_noise",
+        "lie",
+        "gradient_mimicry",
+        "colluding_sign_flip",
+        "min_max",
+        "min_sum",
+        "adaptive_stealth",
+        "heterogeneity_aware_mimicry",
+        "targeted_family_poisoning",
+    )
+)
+
+
+@pytest.mark.parametrize("profile_name", DATACENTER_PROFILE_NAMES)
+def test_committed_datacenter_profiles_translate(profile_name):
+    root = Path(__file__).resolve().parents[3]
+    profile = load_profile(root / "experiments" / "toml" / profile_name)
+    overrides = profile_to_overrides(profile)
+    assert "strategy=instrumented_fedavg" in overrides
+    assert "num_rounds=30" in overrides
+    assert any(value.startswith("+datasets=nfv2/datacenter/") for value in overrides)
