@@ -461,3 +461,28 @@ def test_label_flip_scalar_selector_is_always_hydra_string(
 
     assert expected in overrides
 
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("cicids_full", "+datasets=nfv2/full/cicids"),
+        ("cicids_datacenter", "+datasets=nfv2/datacenter/cicids"),
+        ("nb15_full", "+datasets=nfv2/full/nb15"),
+        ("nb15_datacenter", "+datasets=nfv2/datacenter/nb15"),
+    ],
+)
+def test_full_and_datacenter_dataset_aliases(name, expected):
+    profile = {
+        "experiment": {"num_clients": 10, "rounds": 30},
+        "dataset": {"name": name, "task": "family_aware"},
+        "partition": {"type": "dirichlet", "dirichlet_alpha": 0.5},
+        "model": {"name": "popoola"},
+        "training": {"local_epochs": 1, "batch_size": 512},
+        "attack": {"mechanism": "none", "malicious_fraction": 0.0},
+        "aggregation": {"name": "fedavg"},
+    }
+    overrides = profile_to_overrides(profile)
+    assert expected in overrides
+    assert "partitioner=dirichlet" in overrides
+    assert "partitioner.alpha=0.5" in overrides
