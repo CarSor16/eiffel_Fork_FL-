@@ -19,7 +19,7 @@ param(
     [string]$ValidateHdf5 = "",
     [int]$MaxConcurrentClients = 0,
 
-    [ValidateSet("none", "synthetic50k", "multiclass", "advanced")]
+    [ValidateSet("none", "synthetic50k", "multiclass", "advanced", "datacenter-cicids", "datacenter-nb15", "datacenter-all")]
     [string]$Suite = "none",
 
     [Parameter(ValueFromRemainingArguments=$true)]
@@ -376,6 +376,34 @@ try {
         )
         foreach ($Name in $Names) {
             Invoke-Profile (Resolve-Profile $Name) -ValidateOnly:$DryRun
+        }
+        exit 0
+    }
+
+    if ($Suite -eq "datacenter-cicids" -or $Suite -eq "datacenter-nb15" -or $Suite -eq "datacenter-all") {
+        $DatasetPrefixes = @()
+        if ($Suite -eq "datacenter-cicids" -or $Suite -eq "datacenter-all") { $DatasetPrefixes += "dc_cicids" }
+        if ($Suite -eq "datacenter-nb15" -or $Suite -eq "datacenter-all") { $DatasetPrefixes += "dc_nb15" }
+        $AttackSuffixes = @(
+            "clean",
+            "label_flip_targeted",
+            "sign_flip",
+            "model_scaling",
+            "gaussian_noise",
+            "lie",
+            "gradient_mimicry",
+            "colluding_sign_flip",
+            "min_max",
+            "min_sum",
+            "adaptive_stealth",
+            "heterogeneity_aware_mimicry",
+            "targeted_family_poisoning"
+        )
+        foreach ($Prefix in $DatasetPrefixes) {
+            foreach ($Suffix in $AttackSuffixes) {
+                $Name = $Prefix + "_" + $Suffix
+                Invoke-Profile (Resolve-Profile $Name) -ValidateOnly:$DryRun
+            }
         }
         exit 0
     }
