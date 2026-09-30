@@ -153,7 +153,11 @@ Current aliases:
 
 ```text
 cicids / cse-cic-ids2018 -> nfv2/sampled/cicids
-nb15 / unsw-nb15         -> nfv2/sampled/nb15
+cicids_full                -> nfv2/full/cicids
+cicids_datacenter          -> nfv2/datacenter/cicids
+nb15 / unsw-nb15           -> nfv2/sampled/nb15
+nb15_full                   -> nfv2/full/nb15
+nb15_datacenter             -> nfv2/datacenter/nb15
 toniot / ton-iot         -> nfv2/sampled/toniot
 botiot                    -> nfv2/sampled/botiot
 ```
@@ -288,3 +292,15 @@ Compare all stored runs under outputs:
 The metric-analysis module reads client metrics from round_state.h5 and creates
 round-by-round line plots, final grouped attack bar plots, clean-baseline deltas,
 per-family recall comparisons, CSV exports and multi-seed mean/std aggregation.
+
+
+## Data-center profiles
+
+The thesis-scale real-data profiles use the full NF-V2 representations of
+CSE-CIC-IDS2018 and UNSW-NB15. They are named `dc_cicids_*` and `dc_nb15_*`.
+The data-center Hydra groups read the file paths from `EIFFEL_CICIDS_PATH` and
+`EIFFEL_NB15_PATH`, so large datasets can remain on shared/scratch storage instead
+of inside the Git repository.
+
+See `docs/DATACENTER_RUNBOOK.md` for Linux setup, SLURM submission, suite execution
+and multi-seed campaigns.
