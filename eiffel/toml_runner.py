@@ -52,6 +52,10 @@ DATASETS = {
     "botiot": "nfv2/sampled/botiot",
     "synthetic_stress": "synthetic/stress",
     "synthetic_50k": "synthetic/stress",
+    "mirage": "mirage/app3",
+    "mirage_app3": "mirage/app3",
+    "mirage-app3": "mirage/app3",
+    "mirage-genai-2025": "mirage/app3",
 }
 
 MODELS = {
@@ -304,6 +308,16 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
     rounds = int(experiment.get("rounds", 10))
     dataset_name = str(dataset.get("name", "cicids")).lower()
     synthetic_stress = dataset_name in {"synthetic_stress", "synthetic_50k"}
+    explicit_hydra_group = str(dataset.get("hydra_group", "")).lower()
+    mirage_app3 = (
+        dataset_name in {
+            "mirage",
+            "mirage_app3",
+            "mirage-app3",
+            "mirage-genai-2025",
+        }
+        or explicit_hydra_group == "mirage/app3"
+    )
     if total_clients < 1:
         raise TomlExperimentError("experiment.num_clients must be >= 1")
     if rounds < 1:
@@ -315,10 +329,11 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         raise TomlExperimentError(
             "dataset.task supports binary, family_aware, or multiclass."
         )
-    if task == "multiclass" and not synthetic_stress:
+    if task == "multiclass" and not (synthetic_stress or mirage_app3):
         raise TomlExperimentError(
-            "dataset.task=multiclass is currently supported only by synthetic_stress. "
-            "Real NF-V2 datasets remain on the binary Eiffel baseline."
+            "dataset.task=multiclass is currently supported by synthetic_stress "
+            "and MIRAGE app_3class. Real NF-V2 datasets remain on the binary "
+            "Eiffel baseline."
         )
 
     mechanism = str(attack.get("mechanism", "none")).lower()
@@ -417,7 +432,15 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
 
     # Partitioning.
     partition_type = str(partition.get("type", "iid")).lower()
-    if synthetic_stress:
+    if mirage_app3:
+        if partition_type != "preassigned":
+            raise TomlExperimentError(
+                "MIRAGE app_3class must use partition.type=preassigned so Eiffel "
+                "preserves the capture-aware non-IID client assignment produced "
+                "during preprocessing."
+            )
+        overrides.append("partitioner=preassigned")
+    elif synthetic_stress:
         if partition_type not in {"iid", "dirichlet"}:
             raise TomlExperimentError(
                 "synthetic_stress supports partition.type iid or dirichlet."
@@ -435,11 +458,12 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
             f"{float(partition.get('dirichlet_alpha', 0.5))}"
         )
     else:
-        if partition_type in {"iid", "dumb", "niid_class", "dirichlet"}:
+        if partition_type in {"iid", "dumb", "niid_class", "dirichlet", "preassigned"}:
             overrides.append(f"partitioner={partition_type}")
         else:
             raise TomlExperimentError(
-                "Unsupported partition.type. Use iid, dumb, niid_class or dirichlet."
+                "Unsupported partition.type. Use iid, dumb, niid_class, dirichlet "
+                "or preassigned."
             )
         if partition_type == "dirichlet":
             overrides.append(
