@@ -190,6 +190,34 @@ def test_disabling_logits_allows_non_dense_probability_head():
     assert np.all((probabilities >= 0.0) & (probabilities <= 1.0))
 
 
+def test_probe_selection_supports_generic_class_names():
+    class GenericProbe:
+        X = pd.DataFrame(
+            np.arange(24, dtype=np.float32).reshape(12, 2)
+        )
+        y = pd.Series([0] * 4 + [1] * 4 + [2] * 4)
+        m = pd.DataFrame(
+            {
+                "ClassName": (
+                    ["ChatGPT"] * 4
+                    + ["Copilot"] * 4
+                    + ["Gemini"] * 4
+                )
+            }
+        )
+
+        def __len__(self):
+            return len(self.X)
+
+    selected = select_probe_positions(GenericProbe(), 6, seed=2026)
+    selected_classes = set(
+        GenericProbe.m["ClassName"].iloc[selected].astype(str).tolist()
+    )
+
+    assert len(selected) == 6
+    assert selected_classes == {"ChatGPT", "Copilot", "Gemini"}
+
+
 def test_probe_selection_is_deterministic_and_family_stratified():
     class OrderedProbe:
         X = pd.DataFrame(
