@@ -174,6 +174,24 @@ def test_mirage_rejects_repartitioning():
         profile_to_overrides(profile)
 
 
+@pytest.mark.parametrize(
+    "profile_name",
+    (
+        "mirage_app3_quick_clean.toml",
+        "mirage_app3_quick_sign_flip.toml",
+    ),
+)
+def test_committed_mirage_profiles_translate(profile_name):
+    root = Path(__file__).resolve().parents[3]
+    profile = load_profile(root / "experiments" / "toml" / profile_name)
+    overrides = profile_to_overrides(profile)
+
+    assert "+datasets=mirage/app3" in overrides
+    assert "partitioner=preassigned" in overrides
+    assert "++model.task=multiclass" in overrides
+    assert "++model.num_classes=3" in overrides
+
+
 def test_multiclass_label_flip_requires_explicit_class_mapping():
     profile = {
         "experiment": {"num_clients": 10, "rounds": 5},
