@@ -194,3 +194,6 @@ data/nfv2/origin/*.csv
 data/nfv2/origin/*.csv.gz
 data/nfv2/sampled/*.csv
 data/nfv2/sampled/*.csv.gz
+
+# Preprocessed MIRAGE datasets are local experiment data.
+data/mirage/
