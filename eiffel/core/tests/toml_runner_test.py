@@ -132,6 +132,48 @@ def test_synthetic_multiclass_translation():
     assert "num_attackers=2" in overrides
 
 
+def test_mirage_multiclass_translation_preserves_preassigned_clients():
+    profile = {
+        "experiment": {"seed": 2026, "num_clients": 10, "rounds": 5},
+        "dataset": {
+            "name": "mirage_app3",
+            "task": "multiclass",
+            "num_classes": 3,
+        },
+        "partition": {"type": "preassigned"},
+        "model": {"name": "p4p_mlp"},
+        "training": {"local_epochs": 1, "batch_size": 128},
+        "attack": {"mechanism": "none", "malicious_fraction": 0.0},
+        "aggregation": {"name": "fedavg"},
+    }
+
+    overrides = profile_to_overrides(profile)
+
+    assert "+datasets=mirage/app3" in overrides
+    assert "partitioner=preassigned" in overrides
+    assert "++model.task=multiclass" in overrides
+    assert "++model.num_classes=3" in overrides
+    assert "model=p4p_mlp" in overrides
+
+
+def test_mirage_rejects_repartitioning():
+    profile = {
+        "experiment": {"num_clients": 10, "rounds": 5},
+        "dataset": {
+            "name": "mirage_app3",
+            "task": "multiclass",
+            "num_classes": 3,
+        },
+        "partition": {"type": "dirichlet", "dirichlet_alpha": 0.5},
+        "model": {"name": "p4p_mlp"},
+        "attack": {"mechanism": "none", "malicious_fraction": 0.0},
+        "aggregation": {"name": "fedavg"},
+    }
+
+    with pytest.raises(TomlExperimentError, match="preassigned"):
+        profile_to_overrides(profile)
+
+
 def test_multiclass_label_flip_requires_explicit_class_mapping():
     profile = {
         "experiment": {"num_clients": 10, "rounds": 5},
