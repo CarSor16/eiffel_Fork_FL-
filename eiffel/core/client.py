@@ -57,6 +57,8 @@ def select_probe_positions(
 
     if "Attack" in test_set.m.columns:
         strata = test_set.m["Attack"].astype(str).to_numpy()
+    elif "ClassName" in test_set.m.columns:
+        strata = test_set.m["ClassName"].astype(str).to_numpy()
     else:
         strata = test_set.y.astype(str).to_numpy()
 
@@ -299,6 +301,12 @@ class EiffelClient(NumPyClient):
             payload["_eiffel_probe_families"] = json.dumps(
                 test_set.m["Attack"].iloc[positions].astype(str).tolist()
             )
+        elif "ClassName" in test_set.m.columns:
+            # Keep the legacy storage key for compatibility with the instrumented
+            # attack/analysis pipeline; its values are generic class names here.
+            payload["_eiffel_probe_families"] = json.dumps(
+                test_set.m["ClassName"].iloc[positions].astype(str).tolist()
+            )
         return payload
 
     def get_parameters(self, config: Config) -> list[NDArray]:
@@ -466,6 +474,8 @@ class EiffelClient(NumPyClient):
         return_data: dict[str, Any] = {}
         if "Attack" in test_set.m.columns:
             class_df = test_set.m["Attack"].astype(str)
+        elif "ClassName" in test_set.m.columns:
+            class_df = test_set.m["ClassName"].astype(str)
         elif multiclass:
             class_df = pd.Series(
                 [f"class_{int(value)}" for value in y_true],
