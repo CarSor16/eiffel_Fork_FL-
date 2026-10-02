@@ -503,18 +503,22 @@ class EiffelClient(NumPyClient):
                 class_names[class_id] = (
                     str(names.index[0]) if len(names) else f"class_{class_id}"
                 )
+            class_recalls: list[float] = []
             attack_recalls: list[float] = []
+            has_attack_semantics = "Attack" in test_set.m.columns
             for idx, class_id in enumerate(labels):
                 name = class_names[class_id]
+                recall_value = float(recall[idx])
                 return_data[name] = {
                     "precision": float(precision[idx]),
-                    "recall": float(recall[idx]),
+                    "recall": recall_value,
                     "f1": float(f1[idx]),
-                    "missrate": float(1.0 - recall[idx]),
+                    "missrate": float(1.0 - recall_value),
                     "support": int(support[idx]),
                 }
-                if name != "Benign":
-                    attack_recalls.append(float(recall[idx]))
+                class_recalls.append(recall_value)
+                if has_attack_semantics and name != "Benign":
+                    attack_recalls.append(recall_value)
             return_data["global"] = {
                 "accuracy": float(np.mean(y_pred == y_true)),
                 "macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
@@ -524,8 +528,15 @@ class EiffelClient(NumPyClient):
                 "mcc": float(matthews_corrcoef(y_true, y_pred)),
                 "num_classes": float(len(labels)),
                 "loss": float(loss),
+                "macro_class_recall": float(np.mean(class_recalls)),
+                "min_class_recall": float(np.min(class_recalls)),
+                "macro_class_missrate": float(
+                    np.mean([1.0 - value for value in class_recalls])
+                ),
             }
             if attack_recalls:
+                # Preserve NIDS-specific aggregate names only when the dataset
+                # explicitly exposes attack-family metadata.
                 return_data["global"].update(
                     {
                         "macro_attack_recall": float(np.mean(attack_recalls)),
