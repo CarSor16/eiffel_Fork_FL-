@@ -192,6 +192,34 @@ data/
 
 The dataset files themselves are not bundled in this repository.
 
+MIRAGE-GenAI-2025 app-classification profiles expect the preprocessing-kit outputs at:
+
+```text
+data/
+└── mirage/
+    └── tasks/
+        └── app_3class/
+            ├── train_scaled_with_clients.parquet
+            └── test_scaled.parquet
+```
+
+The MIRAGE loader uses only the numeric `f__*` columns as model inputs, preserves
+`client_id` as Eiffel's preassigned logical-client partition, and keeps the processed
+test split common to all clients. The dataset directory is ignored by Git.
+
+Validate and run the local five-round baseline with:
+
+```powershell
+.\run.cmd mirage_app3_quick_clean -DryRun
+.\run.cmd mirage_app3_quick_clean -MaxConcurrentClients 2
+```
+
+A matching Sign Flip smoke profile is available as:
+
+```powershell
+.\run.cmd mirage_app3_quick_sign_flip -MaxConcurrentClients 2
+```
+
 ### Where results are saved
 
 Hydra creates one run directory under:
