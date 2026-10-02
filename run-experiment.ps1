@@ -264,7 +264,9 @@ try {
             "synthetic_50k_min_sum",
             "synthetic_50k_adaptive_stealth",
             "synthetic_50k_heterogeneity_aware_mimicry",
-            "synthetic_50k_targeted_family_poisoning"
+            "synthetic_50k_targeted_family_poisoning",
+            "mirage_app3_quick_clean",
+            "mirage_app3_quick_sign_flip"
         )) {
             Write-Host ""
             Write-Host "Checking TOML -> Hydra translation: $DoctorName"
