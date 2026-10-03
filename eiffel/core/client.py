@@ -633,6 +633,8 @@ class EiffelClient(NumPyClient):
             task.operation,
             seed=self.seed,
             target_classes=self.poison_ins.target,
+            source_class=self.poison_ins.source_class,
+            destination_class=self.poison_ins.destination_class,
         )
         if self.poison_ins.poison_eval:
             self.data_holder.poison.remote(
@@ -641,6 +643,8 @@ class EiffelClient(NumPyClient):
                 task.operation,
                 seed=self.seed,
                 target_classes=self.poison_ins.target,
+                source_class=self.poison_ins.source_class,
+                destination_class=self.poison_ins.destination_class,
             )
 
 
