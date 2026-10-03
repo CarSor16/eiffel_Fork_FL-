@@ -1,12 +1,12 @@
 # MIRAGE-GenAI-2025 app_3class local smoke profile.
-# Common setup: 10 fixed non-IID logical clients, 5 FL rounds, seed 2026.
-# This is functional/local validation; thesis-scale runs should use more rounds/seeds.
+# Common setup: 10 fixed non-IID logical clients, 30 FL rounds, seed 2026.
+# Local 30-round MIRAGE experiment; thesis-scale replication should still use multiple seeds.
 
 [experiment]
 name = "mirage-app3-quick-min-max"
 seed = 2026
 num_clients = 10
-rounds = 5
+rounds = 30
 
 [dataset]
 name = "mirage_app3"
