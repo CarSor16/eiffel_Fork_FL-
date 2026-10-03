@@ -618,3 +618,49 @@ def test_committed_datacenter_profiles_translate(profile_name):
     assert "strategy=instrumented_fedavg" in overrides
     assert "num_rounds=30" in overrides
     assert any(value.startswith("+datasets=nfv2/datacenter/") for value in overrides)
+
+
+def test_cli_dry_run_accepts_trailing_hydra_override(tmp_path, capsys):
+    from eiffel.toml_runner import main
+
+    profile = tmp_path / "mirage.toml"
+    profile.write_text(
+        """
+[experiment]
+name = "mirage-cli"
+seed = 2026
+num_clients = 10
+rounds = 30
+
+[dataset]
+name = "mirage_app3"
+task = "multiclass"
+num_classes = 3
+
+[partition]
+type = "preassigned"
+
+[model]
+name = "p4p_mlp"
+
+[attack]
+mechanism = "none"
+malicious_fraction = 0.0
+
+[aggregation]
+name = "fedavg"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    rc = main(
+        [
+            str(profile),
+            "--dry-run",
+            "++experiment.max_concurrent_clients=2",
+        ]
+    )
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "++experiment.max_concurrent_clients=2" in output
