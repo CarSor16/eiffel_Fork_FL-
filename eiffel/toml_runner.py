@@ -515,15 +515,15 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         )
 
         if task == "multiclass":
-            if not mirage_app3:
-                raise TomlExperimentError(
-                    "Explicit multiclass label flipping is currently enabled only "
-                    "for MIRAGE app_3class."
-                )
             if "source_class" not in attack or "destination_class" not in attack:
                 raise TomlExperimentError(
                     "Multiclass label_flip requires attack.source_class and "
                     "attack.destination_class."
+                )
+            if not mirage_app3:
+                raise TomlExperimentError(
+                    "Explicit multiclass label flipping is currently enabled only "
+                    "for MIRAGE app_3class."
                 )
             source_class = int(attack["source_class"])
             destination_class = int(attack["destination_class"])
