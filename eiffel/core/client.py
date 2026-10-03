@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional, cast
 import numpy as np
 import pandas as pd
 import ray
+import tensorflow as tf
 from flwr.client import Client, NumPyClient
 from flwr.common import Config, Scalar
 from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
