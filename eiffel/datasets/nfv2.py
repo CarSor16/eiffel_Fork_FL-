@@ -92,6 +92,8 @@ class NFV2Dataset(Dataset):
         # *,
         seed: int,
         target_classes: Optional[List[str]] = None,
+        source_class: int | None = None,
+        destination_class: int | None = None,
     ) -> int:
         """Poison a dataset by apply a function to a given number of samples.
 
@@ -114,6 +116,12 @@ class NFV2Dataset(Dataset):
         int
             The number of samples that have been modified.
         """
+        if source_class is not None or destination_class is not None:
+            raise ValueError(
+                "NFV2Dataset.poison uses binary label inversion; explicit "
+                "multiclass source/destination mappings are unsupported."
+            )
+
         if seed is None:
             logger.warning(
                 "No seed provided for poisoning. Results will not be reproducible."
