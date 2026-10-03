@@ -1,5 +1,6 @@
-# MIRAGE-GenAI-2025 app classification smoke test with Sign Flip.
-# Pure model poisoning: local labels remain clean.
+# MIRAGE-GenAI-2025 app_3class local smoke profile.
+# Common setup: 10 fixed non-IID logical clients, 5 FL rounds, seed 2026.
+# This is functional/local validation; thesis-scale runs should use more rounds/seeds.
 
 [experiment]
 name = "mirage-app3-quick-sign-flip"
@@ -46,4 +47,5 @@ flush_each_round = true
 capture_inference = true
 capture_logits = true
 capture_probe_features = true
+capture_global_inference = true
 probe_size = 256
