@@ -504,13 +504,6 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
 
     # Attacks.
     if mechanism == "label_flip":
-        if task == "multiclass":
-            raise TomlExperimentError(
-                "Multiclass label flipping is intentionally disabled until the TOML "
-                "defines an explicit source_class -> destination_class mapping. "
-                "Use family_aware for Eiffel-compatible label flipping, or use a "
-                "model-update attack with task=multiclass."
-            )
         overrides.append("model_attack=none")
         if attackers <= 0:
             raise TomlExperimentError("label_flip requires at least one malicious client.")
@@ -520,6 +513,41 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         overrides.append(
             f"attacks.0.profile={_quote_hydra_string(profile)}"
         )
+
+        if task == "multiclass":
+            if not mirage_app3:
+                raise TomlExperimentError(
+                    "Explicit multiclass label flipping is currently enabled only "
+                    "for MIRAGE app_3class."
+                )
+            if "source_class" not in attack or "destination_class" not in attack:
+                raise TomlExperimentError(
+                    "Multiclass label_flip requires attack.source_class and "
+                    "attack.destination_class."
+                )
+            source_class = int(attack["source_class"])
+            destination_class = int(attack["destination_class"])
+            num_classes = int(dataset.get("num_classes", 3))
+            if not 0 <= source_class < num_classes:
+                raise TomlExperimentError(
+                    f"attack.source_class must be in [0, {num_classes - 1}]."
+                )
+            if not 0 <= destination_class < num_classes:
+                raise TomlExperimentError(
+                    f"attack.destination_class must be in [0, {num_classes - 1}]."
+                )
+            if source_class == destination_class:
+                raise TomlExperimentError(
+                    "attack.source_class and attack.destination_class must differ."
+                )
+            overrides.append("attacks.0.type=targeted")
+            overrides.append("++attacks.0.target=null")
+            overrides.append(f"++attacks.0.source_class={source_class}")
+            overrides.append(
+                f"++attacks.0.destination_class={destination_class}"
+            )
+            return overrides
+
         objective = str(attack.get("objective", "untargeted")).lower()
         target = attack.get("target")
         if objective in {"untargeted", "all"}:
