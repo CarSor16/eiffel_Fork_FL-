@@ -312,6 +312,7 @@ try {
             "eiffel\core\tests\toml_runner_test.py",
             "eiffel\core\tests\synthetic_stress_test.py",
             "eiffel\core\tests\synthetic_client_integration_test.py",
+            "eiffel\core\tests\resource_allocation_test.py",
             "eiffel\core\tests\advanced_attacks_integration_test.py",
             "eiffel\datasets\tests\dataset_test.py",
             "eiffel\datasets\tests\nfv2_test.py",
