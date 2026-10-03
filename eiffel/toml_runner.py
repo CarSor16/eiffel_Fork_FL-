@@ -692,11 +692,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     command = build_command(args.profile, args.hydra_overrides)
-    print("TOML profile:", args.profile)
-    print("Eiffel command:")
-    print(" ".join(shlex.quote(part) for part in command))
 
     if args.dry_run:
+        print("TOML profile:", args.profile)
+        print("Eiffel command:")
+        print(" ".join(shlex.quote(part) for part in command))
         return 0
 
     return subprocess.run(command, check=False).returncode
