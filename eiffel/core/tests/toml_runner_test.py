@@ -156,6 +156,36 @@ def test_mirage_multiclass_translation_preserves_preassigned_clients():
     assert "model=p4p_mlp" in overrides
 
 
+def test_mirage_multiclass_label_flip_uses_explicit_mapping():
+    profile = {
+        "experiment": {"seed": 2026, "num_clients": 10, "rounds": 5},
+        "dataset": {
+            "name": "mirage_app3",
+            "task": "multiclass",
+            "num_classes": 3,
+        },
+        "partition": {"type": "preassigned"},
+        "model": {"name": "p4p_mlp"},
+        "attack": {
+            "mechanism": "label_flip",
+            "objective": "targeted",
+            "malicious_fraction": 0.2,
+            "poison_rate": 1.0,
+            "source_class": 2,
+            "destination_class": 1,
+        },
+        "aggregation": {"name": "fedavg"},
+    }
+
+    overrides = profile_to_overrides(profile)
+
+    assert "model_attack=none" in overrides
+    assert "attacks.0.type=targeted" in overrides
+    assert "++attacks.0.target=null" in overrides
+    assert "++attacks.0.source_class=2" in overrides
+    assert "++attacks.0.destination_class=1" in overrides
+
+
 def test_mirage_rejects_repartitioning():
     profile = {
         "experiment": {"num_clients": 10, "rounds": 5},
