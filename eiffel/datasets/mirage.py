@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from eiffel.datasets import Dataset
+from eiffel.datasets.poisoning import PoisonOp
 
 
 FEATURE_PREFIX = "f__"
@@ -27,6 +28,75 @@ class MirageDataset(Dataset):
     """Dataset wrapper for multiclass MIRAGE traffic classification."""
 
     _stratify_column: ClassVar[str] = "ClassName"
+
+    def poison(
+        self,
+        ratio: float,
+        op: PoisonOp,
+        *,
+        seed: int,
+        target_classes: list[str] | None = None,
+        source_class: int | None = None,
+        destination_class: int | None = None,
+    ) -> int:
+        """Apply an explicit source -> destination multiclass label flip.
+
+        The semantic metadata (ClassName/ClassId) remains unchanged so the original
+        traffic class is still available for auditing. Only the supervised label y is
+        modified. This also makes scheduled decrement operations reversible.
+        """
+        del target_classes
+        if source_class is None or destination_class is None:
+            raise ValueError(
+                "MIRAGE label flipping requires source_class and destination_class."
+            )
+        source_class = int(source_class)
+        destination_class = int(destination_class)
+        if source_class == destination_class:
+            raise ValueError(
+                "MIRAGE source_class and destination_class must be different."
+            )
+        if not 0.0 <= float(ratio) <= 1.0:
+            raise ValueError("MIRAGE poisoning ratio must be in [0, 1].")
+
+        d = self.copy()
+        if "ClassId" not in d.m.columns:
+            raise ValueError("MIRAGE metadata is missing ClassId.")
+        known_ids = set(int(v) for v in d.m["ClassId"].unique())
+        if source_class not in known_ids:
+            # Non-IID clients can legitimately have no local samples of a class.
+            return 0
+        if destination_class < 0:
+            raise ValueError("destination_class must be non-negative.")
+
+        if "Poisoned" not in d.m.columns:
+            d.m["Poisoned"] = False
+
+        original_source = d.m["ClassId"].astype(int) == source_class
+        n = int(np.ceil(int(original_source.sum()) * float(ratio)))
+        if op == PoisonOp.INC:
+            candidates = original_source & ~d.m["Poisoned"].astype(bool)
+        elif op == PoisonOp.DEC:
+            candidates = original_source & d.m["Poisoned"].astype(bool)
+        else:
+            raise ValueError(f"Unsupported poisoning operation: {op}")
+
+        n = min(n, int(candidates.sum()))
+        if n <= 0:
+            return 0
+
+        idx = d.y[candidates].sample(n=n, random_state=int(seed)).index
+        if op == PoisonOp.INC:
+            d.y.loc[idx] = destination_class
+            d.m.loc[idx, "Poisoned"] = True
+        else:
+            d.y.loc[idx] = source_class
+            d.m.loc[idx, "Poisoned"] = False
+
+        self.X = d.X
+        self.y = d.y.astype(np.int64)
+        self.m = d.m
+        return int(len(idx))
 
 
 def _check_numeric_features(df: pd.DataFrame, feature_cols: list[str], path: Path) -> None:
