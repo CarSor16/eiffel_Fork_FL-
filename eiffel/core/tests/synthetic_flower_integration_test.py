@@ -96,6 +96,12 @@ probe_size = 32
     )
     assert completed.returncode == 0, completed.stdout
 
+    # Runtime logging should remain human-readable. Flower's full History object is
+    # persisted to JSON/HDF5 and must not be dumped back to the terminal.
+    assert "Round 1/1" in completed.stdout
+    assert "metrics_distributed_fit" not in completed.stdout
+    assert "app_fit: metrics_distributed" not in completed.stdout
+
     h5_path = run_dir / "round_state.h5"
     assert h5_path.exists(), completed.stdout
     with h5py.File(h5_path, "r") as h5:
