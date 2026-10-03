@@ -75,6 +75,7 @@ class InstrumentedFedAvg(FedAvg):
         self.attack_cfg = _plain(model_attack or {})
         self.num_rounds = num_rounds
         self.seed = int(seed)
+        self._round_log_state: dict[int, dict[str, Any]] = {}
 
         enabled = bool(self.storage_cfg.get("enabled", True))
         self.store = RoundStore(
@@ -410,12 +411,19 @@ class InstrumentedFedAvg(FedAvg):
                 self._decode_metrics(fit_results[idx].metrics),
                 phase="fit",
             )
+        malicious_clients = int(sum(malicious_mask))
         self.store.save_round_metadata(
             int(server_round),
             attack_mechanism=mechanism,
             attack_multiplier=round_attack_multiplier,
-            malicious_clients=int(sum(malicious_mask)),
+            malicious_clients=malicious_clients,
         )
+        self._round_log_state[int(server_round)] = {
+            "mechanism": mechanism,
+            "attack_multiplier": float(round_attack_multiplier),
+            "malicious_clients": malicious_clients,
+            "fit_clients": len(results),
+        }
 
         aggregated, metrics = super().aggregate_fit(server_round, results, failures)
         if aggregated is not None:
@@ -483,6 +491,76 @@ class InstrumentedFedAvg(FedAvg):
             results,
             failures,
         )
+
+        # Terminal output stays deliberately compact. Full per-client/per-class
+        # metrics remain available in distributed.json and round_state.h5.
+        weighted: dict[str, float] = {}
+        weight_sums: dict[str, float] = {}
+        for _, evaluate_res in results:
+            decoded = self._decode_metrics(evaluate_res.metrics)
+            global_metrics = decoded.get("global")
+            if not isinstance(global_metrics, Mapping):
+                continue
+            weight = float(max(1, int(evaluate_res.num_examples)))
+            for key in (
+                "accuracy",
+                "macro_f1",
+                "min_class_recall",
+                "min_attack_recall",
+            ):
+                value = global_metrics.get(key)
+                if isinstance(value, (bool, int, float, np.integer, np.floating)):
+                    numeric = float(value)
+                    if np.isfinite(numeric):
+                        weighted[key] = weighted.get(key, 0.0) + numeric * weight
+                        weight_sums[key] = weight_sums.get(key, 0.0) + weight
+
+        summary = {
+            key: weighted[key] / weight_sums[key]
+            for key in weighted
+            if weight_sums.get(key, 0.0) > 0.0
+        }
+        loss = None
+        if aggregated is not None:
+            aggregated_loss = aggregated[0]
+            if aggregated_loss is not None and np.isfinite(float(aggregated_loss)):
+                loss = float(aggregated_loss)
+
+        state = self._round_log_state.pop(int(server_round), {})
+        mechanism = str(state.get("mechanism", "none"))
+        multiplier = float(state.get("attack_multiplier", 0.0))
+        malicious_clients = int(state.get("malicious_clients", 0))
+        fit_clients = int(state.get("fit_clients", len(results)))
+        attack_active = mechanism != "none" and multiplier > 0.0
+        min_recall = summary.get(
+            "min_class_recall",
+            summary.get("min_attack_recall"),
+        )
+
+        parts = [
+            f"Round {int(server_round)}/{int(self.num_rounds or server_round)}",
+            f"clients={fit_clients}/{fit_clients}",
+            (
+                "attack=none"
+                if mechanism == "none"
+                else (
+                    f"attack={mechanism} "
+                    f"active={'yes' if attack_active else 'no'} "
+                    f"malicious={malicious_clients} "
+                    f"schedule={multiplier:.2f}"
+                )
+            ),
+        ]
+        if loss is not None:
+            parts.append(f"loss={loss:.4f}")
+        if "accuracy" in summary:
+            parts.append(f"acc={summary['accuracy']:.4f}")
+        if "macro_f1" in summary:
+            parts.append(f"macro_f1={summary['macro_f1']:.4f}")
+        if min_recall is not None:
+            parts.append(f"min_recall={float(min_recall):.4f}")
+        logger.info(" | ".join(parts))
+
         # A round is complete only after both fit aggregation and distributed
         # evaluation (including persisted global inference) have succeeded.
         self.store.mark_round_complete(int(server_round))
