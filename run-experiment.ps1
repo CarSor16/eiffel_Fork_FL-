@@ -86,6 +86,18 @@ function Invoke-Profile([string]$Path, [switch]$ValidateOnly) {
     if ($MaxConcurrentClients -gt 0) {
         $Args += "++experiment.max_concurrent_clients=$MaxConcurrentClients"
     }
+
+    $ProfileBaseName = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+    $HasExplicitRunDir = $false
+    if ($HydraOverrides) {
+        $HasExplicitRunDir = @(
+            $HydraOverrides | Where-Object { $_ -like "hydra.run.dir=*" }
+        ).Count -gt 0
+    }
+    if ($ProfileBaseName -like "mirage_*" -and -not $HasExplicitRunDir) {
+        $Args += 'hydra.run.dir=${anchor:}/outputs/mirage/${now:%Y-%m-%d}/${now:%H-%M-%S}'
+    }
+
     if ($HydraOverrides) {
         $Args += $HydraOverrides
     }
@@ -346,15 +358,26 @@ try {
     }
 
     if ($Analyze -or $AnalyzeDetailed) {
-        $ResolvedRunsRoot = if ([System.IO.Path]::IsPathRooted($RunsRoot)) {
-            $RunsRoot
-        } else {
-            Join-Path $Root $RunsRoot
+        $EffectiveRunsRoot = $RunsRoot
+        $EffectiveAnalysisOutput = $AnalysisOutput
+        if ($Suite -eq "mirage") {
+            if ($RunsRoot -eq "outputs") {
+                $EffectiveRunsRoot = "outputs\mirage"
+            }
+            if ($AnalysisOutput -eq "analysis-results") {
+                $EffectiveAnalysisOutput = "analysis-results\mirage"
+            }
         }
-        $ResolvedAnalysisOutput = if ([System.IO.Path]::IsPathRooted($AnalysisOutput)) {
-            $AnalysisOutput
+
+        $ResolvedRunsRoot = if ([System.IO.Path]::IsPathRooted($EffectiveRunsRoot)) {
+            $EffectiveRunsRoot
         } else {
-            Join-Path $Root $AnalysisOutput
+            Join-Path $Root $EffectiveRunsRoot
+        }
+        $ResolvedAnalysisOutput = if ([System.IO.Path]::IsPathRooted($EffectiveAnalysisOutput)) {
+            $EffectiveAnalysisOutput
+        } else {
+            Join-Path $Root $EffectiveAnalysisOutput
         }
 
         if ($AnalyzeDetailed) {
