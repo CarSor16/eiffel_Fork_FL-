@@ -51,6 +51,8 @@ class PoisonIns:
     base: PoisonTask
     tasks: Optional[PoisonTasks] = {}
     poison_eval: bool = False
+    source_class: int | None = None
+    destination_class: int | None = None
 
     def __init__(
         self,
@@ -58,11 +60,31 @@ class PoisonIns:
         n_rounds: int,
         target: list[str] | None,
         poison_eval: bool = False,
+        source_class: int | None = None,
+        destination_class: int | None = None,
     ):
         """Initialize the PoisonIns object."""
         self.target = target
         self.base, self.tasks = parse_poisoning_selector(profile, n_rounds)
         self.poison_eval = poison_eval
+        self.source_class = (
+            None if source_class is None else int(source_class)
+        )
+        self.destination_class = (
+            None if destination_class is None else int(destination_class)
+        )
+        if (self.source_class is None) != (self.destination_class is None):
+            raise ConfigError(
+                "source_class and destination_class must be configured together."
+            )
+        if (
+            self.source_class is not None
+            and self.destination_class is not None
+            and self.source_class == self.destination_class
+        ):
+            raise ConfigError(
+                "source_class and destination_class must be different."
+            )
 
     @classmethod
     def from_dict(cls, d: dict, default_target: list[str]) -> "PoisonIns":
