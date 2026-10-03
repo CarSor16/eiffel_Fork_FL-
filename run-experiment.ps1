@@ -83,14 +83,14 @@ function Resolve-Profile([string]$Name) {
 
 function Invoke-Profile([string]$Path, [switch]$ValidateOnly) {
     $Args = @("-m", "eiffel.toml_runner", $Path)
-    if ($ValidateOnly) {
-        $Args += "--dry-run"
-    }
     if ($MaxConcurrentClients -gt 0) {
         $Args += "++experiment.max_concurrent_clients=$MaxConcurrentClients"
     }
     if ($HydraOverrides) {
         $Args += $HydraOverrides
+    }
+    if ($ValidateOnly) {
+        $Args += "--dry-run"
     }
 
     Write-Host ""
