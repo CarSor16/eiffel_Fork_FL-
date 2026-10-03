@@ -717,7 +717,13 @@ def main(argv: list[str] | None = None) -> int:
         nargs="*",
         help="Additional Hydra overrides appended after the TOML translation.",
     )
-    args = parser.parse_args(argv)
+    # Hydra overrides are positional strings (often starting with '+'/'++').
+    # parse_intermixed_args lets optional flags such as --dry-run appear before or
+    # after those overrides without argparse rejecting the remaining positionals.
+    if hasattr(parser, "parse_intermixed_args"):
+        args = parser.parse_intermixed_args(argv)
+    else:  # pragma: no cover - Python 3.10+ provides parse_intermixed_args
+        args = parser.parse_args(argv)
 
     command = build_command(args.profile, args.hydra_overrides)
 
