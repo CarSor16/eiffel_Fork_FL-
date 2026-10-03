@@ -391,8 +391,16 @@ def compute_client_resources(
             f" of available CPUs ({available_cpus}). Some clients will be run"
             " sequentially."
         )
+    # Ray accepts fractional CPU resources. Do not floor this value: with
+    # 6 CPUs, 10% headroom and n_concurrent=2, flooring 2.7 to 2 lets Ray create
+    # three actors and silently violates the requested concurrency cap.
+    num_cpus = (
+        float(available_cpus) / float(n_concurrent)
+        if n_concurrent <= available_cpus
+        else 1.0
+    )
     return {
-        "num_cpus": math.floor(max(1, available_cpus / n_concurrent)),
+        "num_cpus": max(1.0, num_cpus),
         "num_gpus": available_gpus / min(n_concurrent, available_cpus),
     }
 
