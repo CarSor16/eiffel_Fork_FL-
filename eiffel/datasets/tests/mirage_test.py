@@ -3,6 +3,7 @@
 import pandas as pd
 
 from eiffel.datasets.mirage import MirageDataset, load_data
+from eiffel.datasets.poisoning import PoisonOp
 
 
 def test_mirage_loader_preserves_features_split_and_client_hints(tmp_path):
@@ -51,3 +52,41 @@ def test_mirage_loader_preserves_features_split_and_client_hints(tmp_path):
     assert set(dataset.m["ClassName"]) == {"ChatGPT", "Copilot", "Gemini"}
     assert "target_id" not in dataset.X
     assert "capture_id" not in dataset.X
+
+
+def test_mirage_multiclass_label_flip_is_explicit_and_reversible():
+    dataset = MirageDataset(
+        X=pd.DataFrame({"f__a": [0.1, 0.2, 0.3, 0.4]}),
+        y=pd.Series([2, 2, 1, 0], dtype="int64"),
+        m=pd.DataFrame(
+            {
+                "ClassName": ["Gemini", "Gemini", "Copilot", "ChatGPT"],
+                "ClassId": [2, 2, 1, 0],
+            }
+        ),
+        key="mirage-test",
+        _default_target=["ChatGPT"],
+    )
+
+    changed = dataset.poison(
+        1.0,
+        PoisonOp.INC,
+        seed=2026,
+        source_class=2,
+        destination_class=1,
+    )
+    assert changed == 2
+    assert dataset.y.tolist() == [1, 1, 1, 0]
+    assert dataset.m["ClassId"].tolist() == [2, 2, 1, 0]
+    assert dataset.m["Poisoned"].tolist() == [True, True, False, False]
+
+    restored = dataset.poison(
+        1.0,
+        PoisonOp.DEC,
+        seed=2026,
+        source_class=2,
+        destination_class=1,
+    )
+    assert restored == 2
+    assert dataset.y.tolist() == [2, 2, 1, 0]
+    assert not dataset.m["Poisoned"].any()
