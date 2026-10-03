@@ -1,0 +1,54 @@
+# MIRAGE-GenAI-2025 app_3class local smoke profile.
+# Common setup: 10 fixed non-IID logical clients, 5 FL rounds, seed 2026.
+# This is functional/local validation; thesis-scale runs should use more rounds/seeds.
+
+[experiment]
+name = "mirage-app3-quick-min-max"
+seed = 2026
+num_clients = 10
+rounds = 5
+
+[dataset]
+name = "mirage_app3"
+task = "multiclass"
+num_classes = 3
+
+[partition]
+type = "preassigned"
+
+[model]
+name = "p4p_mlp"
+dropout = 0.2
+
+[training]
+local_epochs = 1
+learning_rate = 0.001
+batch_size = 128
+
+[attack]
+mechanism = "min_max"
+malicious_fraction = 0.2
+
+[attack.min_max]
+direction = "negative_mean"
+search_steps = 24
+max_lambda = 10.0
+constraint_margin = 1.0
+
+[attack.schedule]
+type = "continuous"
+
+[aggregation]
+name = "fedavg"
+
+[storage]
+enabled = true
+path = "round_state.h5"
+compression = "gzip"
+compression_level = 4
+flush_each_round = true
+capture_inference = true
+capture_logits = true
+capture_probe_features = true
+capture_global_inference = true
+probe_size = 256
