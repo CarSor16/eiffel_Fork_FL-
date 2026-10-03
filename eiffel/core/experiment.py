@@ -391,16 +391,18 @@ def compute_client_resources(
             f" of available CPUs ({available_cpus}). Some clients will be run"
             " sequentially."
         )
-    # Ray accepts fractional CPU resources. Do not floor this value: with
-    # 6 CPUs, 10% headroom and n_concurrent=2, flooring 2.7 to 2 lets Ray create
-    # three actors and silently violates the requested concurrency cap.
+    # Ray 2.6 requires CPU resource quantities greater than one to be whole
+    # numbers. Use ceil(total_cpus / requested_concurrency): this prevents Ray from
+    # scheduling more than the requested number of client actors without passing an
+    # invalid fractional quantity such as 2.7 CPUs.
+    total_cpus = max(1, int(psutil.cpu_count() or 1))
     num_cpus = (
-        float(available_cpus) / float(n_concurrent)
-        if n_concurrent <= available_cpus
+        float(math.ceil(total_cpus / n_concurrent))
+        if n_concurrent <= total_cpus
         else 1.0
     )
     return {
-        "num_cpus": max(1.0, num_cpus),
+        "num_cpus": num_cpus,
         "num_gpus": available_gpus / min(n_concurrent, available_cpus),
     }
 
