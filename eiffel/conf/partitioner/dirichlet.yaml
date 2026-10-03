@@ -1,0 +1,7 @@
+_target_: eiffel.datasets.partitioners.DirichletPartitioner
+_partial_: true
+
+class_column: "Attack"
+alpha: 0.5
+min_partition_size: 1
+seed: ${seed}

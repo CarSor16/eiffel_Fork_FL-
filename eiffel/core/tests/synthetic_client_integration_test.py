@@ -1,0 +1,152 @@
+"""Small end-to-end client smoke test for the synthetic FL-NIDS path."""
+
+import json
+from functools import partial
+
+import ray
+
+from eiffel.core.client import EiffelClient
+from eiffel.core.pool import Pool
+from eiffel.datasets.dataset import DatasetHandle
+from eiffel.datasets.synthetic_stress import load_data
+from eiffel.models.advanced import mk_stress_mlp
+
+
+def _split_synthetic(dataset):
+    train_mask = dataset.m["Split"] == "train"
+    test_mask = dataset.m["Split"] == "test"
+
+    train = dataset.copy()
+    train.X = dataset.X.loc[train_mask].copy()
+    train.y = dataset.y.loc[train_mask].copy()
+    train.m = dataset.m.loc[train_mask].copy()
+
+    test = dataset.copy()
+    test.X = dataset.X.loc[test_mask].copy()
+    test.y = dataset.y.loc[test_mask].copy()
+    test.m = dataset.m.loc[test_mask].copy()
+    return train, test
+
+
+def test_synthetic_client_can_fit_and_evaluate_one_round():
+    if ray.is_initialized():
+        ray.shutdown()
+    ray.init(
+        num_cpus=1,
+        num_gpus=0,
+        local_mode=True,
+        include_dashboard=False,
+        ignore_reinit_error=True,
+        logging_level="ERROR",
+    )
+    try:
+        dataset = load_data(
+            seed=2026,
+            num_clients=1,
+            samples_per_client=128,
+            central_test_size=256,
+            num_features=8,
+            num_classes=4,
+            rare_class_id=3,
+            rare_class_probability=0.05,
+            latent_dim=4,
+            informative_features=6,
+            redundant_features=2,
+            partition_mode="iid",
+            train_label_noise=0.0,
+        )
+        train, test = _split_synthetic(dataset)
+        holder = DatasetHandle.remote({"train": train, "test": test})
+        model = mk_stress_mlp(
+            8,
+            hidden1=16,
+            hidden2=8,
+            learning_rate=0.001,
+        )
+        client = EiffelClient(
+            "smoke_benign_0",
+            holder,
+            model,
+            seed=2026,
+        )
+
+        parameters, examples, metrics = client.fit(
+            model.get_weights(),
+            {
+                "batch_size": 32,
+                "num_epochs": 1,
+                "round": 1,
+                "capture_inference": True,
+                "probe_size": 32,
+            },
+        )
+
+        assert examples == 128
+        assert len(parameters) == len(model.get_weights())
+        assert "_cid" in metrics
+        assert metrics["_eiffel_malicious"] is False
+        assert "global" in metrics
+        assert "_eiffel_probabilities" in metrics
+        assert "_eiffel_logits" in metrics
+        assert "_eiffel_probe_features" in metrics
+        assert "_eiffel_probe_labels" in metrics
+        assert "_eiffel_probe_families" in metrics
+        decoded = json.loads(metrics["global"])
+        assert 0.0 <= float(decoded["accuracy"]) <= 1.0
+        assert "macro_f1" in decoded
+        assert "mcc" in decoded
+
+        # A model-poisoning client is malicious because of its security role, not
+        # because it carries data-poisoning instructions.
+        attacker_model = mk_stress_mlp(
+            8,
+            hidden1=16,
+            hidden2=8,
+            learning_rate=0.001,
+        )
+        attacker = EiffelClient(
+            "opaque_client_id",
+            holder,
+            attacker_model,
+            seed=2026,
+            poison_ins=None,
+            is_malicious=True,
+        )
+        _, attacker_examples, attacker_metrics = attacker.fit(
+            attacker_model.get_weights(),
+            {
+                "batch_size": 32,
+                "num_epochs": 1,
+                "round": 1,
+                "capture_inference": False,
+            },
+        )
+        assert attacker_examples == 128
+        assert attacker.poison_ins is None
+        assert attacker.is_malicious is True
+        assert attacker_metrics["_eiffel_malicious"] is True
+
+        # Pools can likewise declare malicious clients without requiring a fake
+        # PoisonIns object. The generated client mapping carries the role explicitly.
+        pool = Pool(
+            dataset=dataset,
+            model_fn=partial(
+                mk_stress_mlp,
+                hidden1=16,
+                hidden2=8,
+                learning_rate=0.001,
+            ),
+            n_benign=1,
+            n_malicious=1,
+            attack=None,
+            seed=2026,
+        )
+        pool.deploy()
+        mappings = pool.gen_mappings()
+        malicious_entries = [
+            entry for entry in mappings.values() if bool(entry[3])
+        ]
+        assert len(malicious_entries) == 1
+        assert malicious_entries[0][1] is None
+    finally:
+        ray.shutdown()

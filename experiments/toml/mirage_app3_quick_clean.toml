@@ -1,0 +1,46 @@
+# MIRAGE-GenAI-2025 app_3class local smoke profile.
+# Common setup: 10 fixed non-IID logical clients, 30 FL rounds, seed 2026.
+# Local 30-round MIRAGE experiment; thesis-scale replication should still use multiple seeds.
+
+[experiment]
+name = "mirage-app3-quick-clean"
+seed = 2026
+num_clients = 10
+rounds = 30
+
+[dataset]
+name = "mirage_app3"
+task = "multiclass"
+num_classes = 3
+
+[partition]
+type = "preassigned"
+
+[model]
+name = "p4p_mlp"
+dropout = 0.2
+
+[training]
+local_epochs = 1
+learning_rate = 0.001
+batch_size = 128
+
+[attack]
+mechanism = "none"
+objective = "untargeted"
+malicious_fraction = 0.0
+
+[aggregation]
+name = "fedavg"
+
+[storage]
+enabled = true
+path = "round_state.h5"
+compression = "gzip"
+compression_level = 4
+flush_each_round = true
+capture_inference = true
+capture_logits = true
+capture_probe_features = true
+capture_global_inference = true
+probe_size = 256

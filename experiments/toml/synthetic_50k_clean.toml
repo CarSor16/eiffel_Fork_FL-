@@ -1,0 +1,68 @@
+# 50k synthetic FL-NIDS stress profile.
+# 10 clients x 5,000 federated training samples = 50,000.
+# A separate 12,000-sample common test set is generated automatically.
+
+[experiment]
+name = "synthetic-50k-clean"
+seed = 2026
+num_clients = 10
+rounds = 30
+
+[dataset]
+name = "synthetic_stress"
+task = "binary"
+samples_per_client = 5000
+central_test_size = 12000
+num_features = 32
+num_classes = 6
+rare_class_id = 3
+rare_class_probability = 0.025
+rare_specialist_client = 0
+rare_specialist_strength = 0.25
+feature_noise = 0.60
+stress_latent_dim = 10
+stress_informative_features = 16
+stress_redundant_features = 8
+stress_class_separation = 1.80
+stress_latent_noise = 0.90
+stress_secondary_mode_probability = 0.35
+stress_hard_example_fraction = 0.12
+stress_train_label_noise = 0.01
+stress_client_shift_std = 0.18
+stress_central_shift_std = 0.10
+stress_outlier_fraction = 0.012
+
+[partition]
+type = "dirichlet"
+dirichlet_alpha = 0.5
+
+[model]
+name = "stress_mlp"
+hidden1 = 64
+hidden2 = 32
+weight_decay = 0.0001
+
+[training]
+local_epochs = 1
+learning_rate = 0.001
+batch_size = 128
+adam_beta1 = 0.9
+adam_beta2 = 0.999
+
+[attack]
+mechanism = "none"
+objective = "untargeted"
+malicious_fraction = 0.0
+
+
+[aggregation]
+name = "fedavg"
+
+[storage]
+enabled = true
+path = "round_state.h5"
+compression = "gzip"
+compression_level = 4
+flush_each_round = true
+capture_inference = true
+probe_size = 256

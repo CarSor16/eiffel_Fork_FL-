@@ -30,7 +30,7 @@ def test_Dataset():
         mock_df.to_csv(data_path, index=False)
 
         # Test1: load the whole dataset
-        d = load_data(data_path)
+        d = load_data(data_path, seed=SEED)
 
         assert isinstance(d, Dataset)
 

@@ -51,6 +51,8 @@ class PoisonIns:
     base: PoisonTask
     tasks: Optional[PoisonTasks] = {}
     poison_eval: bool = False
+    source_class: int | None = None
+    destination_class: int | None = None
 
     def __init__(
         self,
@@ -58,11 +60,31 @@ class PoisonIns:
         n_rounds: int,
         target: list[str] | None,
         poison_eval: bool = False,
+        source_class: int | None = None,
+        destination_class: int | None = None,
     ):
         """Initialize the PoisonIns object."""
         self.target = target
         self.base, self.tasks = parse_poisoning_selector(profile, n_rounds)
         self.poison_eval = poison_eval
+        self.source_class = (
+            None if source_class is None else int(source_class)
+        )
+        self.destination_class = (
+            None if destination_class is None else int(destination_class)
+        )
+        if (self.source_class is None) != (self.destination_class is None):
+            raise ConfigError(
+                "source_class and destination_class must be configured together."
+            )
+        if (
+            self.source_class is not None
+            and self.destination_class is not None
+            and self.source_class == self.destination_class
+        ):
+            raise ConfigError(
+                "source_class and destination_class must be different."
+            )
 
     @classmethod
     def from_dict(cls, d: dict, default_target: list[str]) -> "PoisonIns":
@@ -93,6 +115,53 @@ class PoisonIns:
                 "`pool.d` must be a PoisonIns or a valid PoisonIns "
                 f"configuration dictionary, got {type(d)}."
             )
+
+
+def poisoning_fraction_at_round(
+    poison_ins: "PoisonIns",
+    server_round: int | None,
+) -> float:
+    """Return the configured poisoned fraction active at a communication round.
+
+    The value is relative to the selected poisoning target (whole dataset for
+    untargeted attacks, target families for targeted attacks).  It reconstructs
+    Eiffel's stateful selector from the base fraction plus all tasks up to the
+    requested round, so it works even when the client object itself is ephemeral.
+    """
+    fraction = float(poison_ins.base.fraction)
+    if server_round is None:
+        return fraction
+
+    for round_number, task in sorted((poison_ins.tasks or {}).items()):
+        if int(round_number) > int(server_round):
+            break
+        if task.operation == PoisonOp.INC:
+            fraction += float(task.fraction)
+        elif task.operation == PoisonOp.DEC:
+            fraction -= float(task.fraction)
+        else:  # pragma: no cover - PoisonOp currently has only INC/DEC
+            raise ValueError(f"Unsupported poisoning operation: {task.operation}")
+
+    # Tiny decimal artefacts can arise from gradual schedules.  Values materially
+    # outside [0, 1] are configuration errors and should not be hidden.
+    if fraction < -1e-9 or fraction > 1.0 + 1e-9:
+        raise ValueError(
+            f"Poisoning profile resolves to invalid fraction {fraction} "
+            f"at round {server_round}."
+        )
+    return float(min(1.0, max(0.0, fraction)))
+
+
+def poisoning_is_configured(poison_ins: Optional["PoisonIns"]) -> bool:
+    """Return whether a PoisonIns ever enables data poisoning."""
+    if poison_ins is None:
+        return False
+    if float(poison_ins.base.fraction) > 0.0:
+        return True
+    return any(
+        task.operation == PoisonOp.INC and float(task.fraction) > 0.0
+        for task in (poison_ins.tasks or {}).values()
+    )
 
 
 def parse_poisoning_selector(
@@ -164,39 +233,78 @@ def parse_poisoning_selector(
     base = float(m.group("base"))
     tasks: PoisonTasks = {}
 
-    p = re.compile(selector_re)
-    for m in p.finditer(selector):
-        if m is None:
-            raise ValueError(f"Invalid selector: '{selector}'; no base value found")
+    # Parse modifiers left-to-right and require full consumption.  The previous
+    # implementation nested two finditer loops and accidentally reused a filtered
+    # round list across tokens (for example +0.4{2}-0.4{4} lost the decrement).
+    modifier_re = re.compile(selector_re)
+    cursor = m.end()
+
+    # Historical Eiffel documentation treats a trailing '*' or '[:]' directly
+    # after the base as equivalent to the plain base value.
+    for base_suffix in ("*", "[:]"):
+        if selector.startswith(base_suffix, cursor):
+            cursor += len(base_suffix)
+            break
+
+    while cursor < len(selector):
+        modifier = modifier_re.match(selector, cursor)
+        if modifier is None:
+            raise ValueError(
+                f"Invalid selector: '{selector}'; unexpected syntax at "
+                f"position {cursor}"
+            )
+
+        _op = modifier.group("op")
+        _inc = modifier.group("inc")
+        if _op is None or _inc is None:
+            raise ValueError(f"Invalid selector: '{selector}'; no increment found")
+
+        op = PoisonOp(_op)
+        inc = float(_inc)
+        if not 0.0 <= inc <= 1.0:
+            raise ValueError(
+                f"Invalid selector: '{selector}'; increment must be in [0, 1]"
+            )
 
         rounds = list(range(1, n_rounds + 1))
+        if modifier.group("range") is not None:
+            from_ = (
+                int(modifier.group("from"))
+                if modifier.group("from") is not None
+                else 1
+            )
+            to = (
+                int(modifier.group("to"))
+                if modifier.group("to") is not None
+                else n_rounds
+            )
+            if from_ < 1 or to > n_rounds or from_ > to:
+                raise IndexError(
+                    f"Invalid range: '{selector}'; round index out of bounds"
+                )
+            rounds = list(range(from_, to + 1))
+        elif modifier.group("set") is not None:
+            requested = [
+                int(value)
+                for value in modifier.group("set_items").split(",")
+                if value
+            ]
+            if any(value < 1 or value > n_rounds for value in requested):
+                raise IndexError(
+                    f"Invalid set: '{selector}'; round index out of bounds"
+                )
+            rounds = requested
 
-        for m in p.finditer(selector):
-            _op = m.group("op")
-            _inc = m.group("inc")
-            if _op is None or _inc is None:
-                raise ValueError(f"Invalid selector: '{selector}'; no increment found")
+        # Later modifiers intentionally overwrite earlier tasks for the same round,
+        # matching the documented Eiffel selector precedence.
+        for round_number in rounds:
+            tasks[round_number] = PoisonTask(fraction=inc, operation=op)
 
-            op = PoisonOp(_op)
-            inc = float(_inc)
+        cursor = modifier.end()
 
-            if m.group("range") is not None:
-                from_ = int(m.group("from")) if m.group("from") is not None else 1
-                to = int(m.group("to")) if m.group("to") is not None else n_rounds
-                rounds = list(range(from_, to + 1))
-                if from_ < 1 or to > n_rounds or from_ > to:
-                    raise IndexError(
-                        f"Invalid range: '{selector}'; round index out of bounds"
-                    )
-            elif m.group("set") is not None:
-                rounds = [
-                    r
-                    for r in rounds
-                    if r in map(int, [int(r) for r in m.group("set_items").split(",")])
-                ]
-            # else: all rounds
-
-            for r in rounds:
-                tasks[r] = PoisonTask(fraction=inc, operation=op)
+    if not 0.0 <= base <= 1.0:
+        raise ValueError(
+            f"Invalid selector: '{selector}'; base fraction must be in [0, 1]"
+        )
 
     return PoisonTask(base), tasks

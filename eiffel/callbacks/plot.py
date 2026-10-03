@@ -2,6 +2,7 @@
 
 import json
 import os
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ class PlotterCallback(Callback):
     For reference, see: https://hydra.cc/docs/experimental/callbacks/.
     """
 
-    def __init__(self, output: str, input: str = "metrics.json") -> None:
+    def __init__(self, output: str, input: str = "fit.json") -> None:
         self.input = input
         self.output = output
 
@@ -34,7 +35,9 @@ class PlotterCallback(Callback):
             metrics = json.loads(f)
             self._plot(metrics, output=self.output)
         except FileNotFoundError:
-            print(f"File {self.input} not found.")
+            # Failed/interrupted jobs may end before Eiffel writes result JSON.
+            # The original experiment exception is the useful diagnostic in that case.
+            return
 
     def _plot(self, metrics: dict, output: str) -> None:
         """Generate the plot."""
@@ -61,41 +64,63 @@ class PlotCallback(PlotterCallback):
         self.smooth = smooth
 
     def _plot(self, metrics: dict, output: str) -> None:
-        """Generate the plot."""
-        benign_metrics = []
-        attacker_metrics = []
+        """Generate the plot from Eiffel fit/distributed result JSON."""
+        benign_by_round: dict[int, list[float]] = defaultdict(list)
+        attacker_by_round: dict[int, list[float]] = defaultdict(list)
 
         for cid, cmetrics in metrics.items():
-            selection = [m[self.metric] for _, m in cmetrics.items()]
-            if "malicious" in cid:
-                attacker_metrics.append(selection)
-            else:
-                benign_metrics.append(selection)
+            if not isinstance(cmetrics, dict):
+                continue
+            target = attacker_by_round if "malicious" in str(cid) else benign_by_round
+            for round_key, round_metrics in cmetrics.items():
+                if not isinstance(round_metrics, dict):
+                    continue
+                value = round_metrics.get(self.metric)
+                if value is None:
+                    global_metrics = round_metrics.get("global", {})
+                    if isinstance(global_metrics, dict):
+                        value = global_metrics.get(self.metric)
+                if not isinstance(value, (int, float)):
+                    continue
+                try:
+                    round_number = int(round_key)
+                except (TypeError, ValueError):
+                    continue
+                target[round_number].append(float(value))
 
-        benign_metrics = list(zip(*benign_metrics))
-        attacker_metrics = list(zip(*attacker_metrics))
+        if not benign_by_round:
+            return
 
-        benign_metrics = [sum(m) / len(m) for m in benign_metrics]
-        attacker_metrics = [sum(m) / len(m) for m in attacker_metrics]
-        rounds = [r + 1 for r in range(len(benign_metrics))]
-
+        rounds = sorted(benign_by_round)
+        benign_metrics = [
+            float(np.mean(benign_by_round[round_number]))
+            for round_number in rounds
+        ]
         benign_plot = (rounds, benign_metrics)
-        attacker_plot = (rounds, attacker_metrics)
 
-        if self.smooth:
-            # 300 represents number of points to make between min and max
+        attacker_rounds = sorted(attacker_by_round)
+        attacker_metrics = [
+            float(np.mean(attacker_by_round[round_number]))
+            for round_number in attacker_rounds
+        ]
+        attacker_plot = (attacker_rounds, attacker_metrics)
+
+        if self.smooth and len(rounds) >= 3:
+            # 300 represents number of points to make between min and max.
             lin_x = np.linspace(min(rounds), max(rounds), 300)
             benign_spl = make_interp_spline(
                 rounds, benign_metrics, k=2
             )  # type: BSpline
-            benign_smooth = benign_spl(lin_x)
+            benign_plot = (lin_x, benign_spl(lin_x))
 
-            benign_plot = (lin_x, benign_smooth)
-
-            if attacker_metrics:
-                attacker_spl = make_interp_spline(rounds, attacker_metrics, k=2)
-                attacker_smooth = attacker_spl(lin_x)
-                attacker_plot = (lin_x, attacker_smooth)
+            if len(attacker_rounds) >= 3:
+                attacker_x = np.linspace(
+                    min(attacker_rounds), max(attacker_rounds), 300
+                )
+                attacker_spl = make_interp_spline(
+                    attacker_rounds, attacker_metrics, k=2
+                )
+                attacker_plot = (attacker_x, attacker_spl(attacker_x))
 
         plt.figure()
         plt.title(f"Mean {self.metric}")

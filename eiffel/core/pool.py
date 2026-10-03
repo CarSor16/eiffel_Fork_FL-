@@ -87,20 +87,37 @@ class Pool:
         self.pool_id = pool_id
 
         benign_cids = [f"{pool_id}_benign_{i}" for i in range(n_benign)]
-        if n_malicious > 0 and attack is None:
-            raise ValueError(
-                "Invalid conditions for attack scenarios: "
-                f"`{n_malicious = }`, yet attack is `None`."
-            )
-        elif n_malicious == 0 and attack is not None:
+        if n_malicious == 0 and attack is not None:
             logger.warning(
                 "Ignoring attack instructions: no malicious clients in the pool."
             )
         malicious_cids = [f"{pool_id}_malicious_{i}" for i in range(n_malicious)]
+        self.malicious_ids = set(malicious_cids)
 
         if not isinstance(dataset, Dataset):
             dataset = call(dataset)
-        _test, _train = dataset.split(at=test_ratio, seed=self.seed)
+
+        # Synthetic/replay datasets can provide an explicit train/test split in
+        # metadata. This preserves an exact federated training sample count and a
+        # separate common test distribution instead of randomly re-splitting them.
+        if "Split" in dataset.m.columns and set(dataset.m["Split"].unique()) >= {
+            "train",
+            "test",
+        }:
+            train_mask = dataset.m["Split"] == "train"
+            test_mask = dataset.m["Split"] == "test"
+
+            _train = dataset.copy()
+            _train.X = dataset.X.loc[train_mask].copy()
+            _train.y = dataset.y.loc[train_mask].copy()
+            _train.m = dataset.m.loc[train_mask].copy()
+
+            _test = dataset.copy()
+            _test.X = dataset.X.loc[test_mask].copy()
+            _test.y = dataset.y.loc[test_mask].copy()
+            _test.m = dataset.m.loc[test_mask].copy()
+        else:
+            _test, _train = dataset.split(at=test_ratio, seed=self.seed)
 
         if not partitioner:
             partitioner = DumbPartitioner
@@ -119,19 +136,27 @@ class Pool:
         for cid in benign_cids:
             self.shards[cid] = (_train_shards.pop(), _test_shards.pop())
 
-        if attack:
+        if attack is not None:
             assert isinstance(attack, PoisonIns)
+            p_task = attack.base
+        else:
+            p_task = None
 
-            p_task = self.attack.base
-            for cid in malicious_cids:
-                _train_shard = _train_shards.pop()
+        for cid in malicious_cids:
+            _train_shard = _train_shards.pop()
+            # Model-poisoning clients need no data-poisoning instructions. If a
+            # PoisonIns is present, only apply its non-zero base poisoning here;
+            # scheduled tasks remain EiffelClient's responsibility.
+            if p_task is not None and p_task.fraction > 0.0:
                 _train_shard.poison(
                     p_task.fraction,
                     p_task.operation,
-                    target_classes=self.attack.target,
+                    target_classes=attack.target,
+                    source_class=attack.source_class,
+                    destination_class=attack.destination_class,
                     seed=self.seed,
                 )
-                self.shards[cid] = (_train_shard, _test_shards.pop())
+            self.shards[cid] = (_train_shard, _test_shards.pop())
 
     def __len__(self) -> int:
         """Return the number of clients in the pool."""
@@ -156,14 +181,19 @@ class Pool:
         """Return whether the pool is deployed."""
         return len(self.holders) == len(self.shards)
 
-    def gen_mappings(self) -> dict[EiffelCID, tuple[ObjectRef, PoisonIns, keras.Model]]:
+    def gen_mappings(
+        self,
+    ) -> dict[
+        EiffelCID,
+        tuple[ObjectRef, PoisonIns | None, keras.Model, bool],
+    ]:
         """Generate mappings between CIDs, and their handle and poisoning instructions.
 
         Returns
         -------
-        dict[EiffelCID, tuple[ObjectRef, PoisonIns]]
-            The mappings. Keys are the client IDs, and values are tuples of each
-            client's dataset handle and poisoning instructions.
+        dict[EiffelCID, tuple[ObjectRef, PoisonIns | None, keras.Model, bool]]
+            The mappings. Each entry carries the dataset handle, optional data
+            poisoning instructions, model factory, and explicit malicious role.
         """
         if not self.deployed():
             raise RuntimeError(
@@ -172,10 +202,12 @@ class Pool:
 
         mappings = {}
         for cid, handle in self.holders.items():
+            is_malicious = cid in self.malicious_ids
             mappings[cid] = (
                 handle,
-                self.attack if "malicious" in cid else None,
+                self.attack if is_malicious else None,
                 self.model_fn,
+                is_malicious,
             )
         return mappings
 

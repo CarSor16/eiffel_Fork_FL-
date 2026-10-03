@@ -31,14 +31,14 @@ def test_load_data():
         mock_df.to_csv(data_path, index=False)
 
         # Test1: load the whole dataset
-        d = load_data(data_path)
+        d = load_data(data_path, seed=1138)
 
         assert isinstance(d, Dataset)
         assert len(d) == len(mock_df)
         assert set(d.X.columns) == set(cols) - set(RM_COLS)
 
         # Test2: load with train/test split
-        train, test = d.split(at=0.8)
+        train, test = d.split(at=0.8, seed=7)
         train2, test2 = d.split(at=0.8, seed=1138)
         train3, test3 = d.split(at=0.8, seed=1138)
 
@@ -170,3 +170,50 @@ def test_poison_untargeted():
 
 if __name__ == "__main__":
     test_poison_untargeted()
+
+
+def test_clean_poison_is_true_noop_for_integer_labels():
+    """A pure model-poisoning client must keep integer labels numeric."""
+    m = pd.DataFrame({"Attack": ["Benign", "Botnet", "Benign", "DoS"]})
+    y = pd.Series([0, 1, 0, 1], dtype="int64", name="Label")
+    dataset = NFV2Dataset(
+        pd.DataFrame(
+            np.arange(8, dtype=np.float32).reshape(4, 2),
+            columns=["f0", "f1"],
+        ),
+        y.copy(),
+        m,
+    )
+
+    before = dataset.y.copy()
+    changed = dataset.poison(
+        *PoisonTask(0.0),
+        seed=1138,
+    )
+
+    assert changed == 0
+    assert dataset.y.dtype == np.dtype("int64")
+    pd.testing.assert_series_equal(dataset.y, before)
+
+
+def test_integer_binary_poison_preserves_dtype_and_flips_values():
+    """Synthetic-stress integer labels remain int64 after label flipping."""
+    m = pd.DataFrame({"Attack": ["Benign", "Botnet", "Benign", "DoS"]})
+    y = pd.Series([0, 1, 0, 1], dtype="int64", name="Label")
+    dataset = NFV2Dataset(
+        pd.DataFrame(
+            np.arange(8, dtype=np.float32).reshape(4, 2),
+            columns=["f0", "f1"],
+        ),
+        y,
+        m,
+    )
+
+    changed = dataset.poison(
+        *PoisonTask(1.0),
+        seed=1138,
+    )
+
+    assert changed == 4
+    assert dataset.y.dtype == np.dtype("int64")
+    assert dataset.y.tolist() == [1, 0, 1, 0]

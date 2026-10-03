@@ -187,3 +187,13 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+
+
+# Large NIDS datasets are stored outside Git.
+data/nfv2/origin/*.csv
+data/nfv2/origin/*.csv.gz
+data/nfv2/sampled/*.csv
+data/nfv2/sampled/*.csv.gz
+
+# Preprocessed MIRAGE datasets are local experiment data.
+data/mirage/
