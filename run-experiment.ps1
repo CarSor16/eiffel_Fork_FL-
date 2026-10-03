@@ -19,7 +19,7 @@ param(
     [string]$ValidateHdf5 = "",
     [int]$MaxConcurrentClients = 0,
 
-    [ValidateSet("none", "synthetic50k", "multiclass", "advanced", "datacenter-cicids", "datacenter-nb15", "datacenter-all")]
+    [ValidateSet("none", "synthetic50k", "multiclass", "advanced", "mirage", "datacenter-cicids", "datacenter-nb15", "datacenter-all")]
     [string]$Suite = "none",
 
     [Parameter(ValueFromRemainingArguments=$true)]
@@ -276,7 +276,18 @@ try {
             "synthetic_50k_heterogeneity_aware_mimicry",
             "synthetic_50k_targeted_family_poisoning",
             "mirage_app3_quick_clean",
-            "mirage_app3_quick_sign_flip"
+            "mirage_app3_quick_label_flip_targeted",
+            "mirage_app3_quick_sign_flip",
+            "mirage_app3_quick_model_scaling",
+            "mirage_app3_quick_gaussian_noise",
+            "mirage_app3_quick_lie",
+            "mirage_app3_quick_gradient_mimicry",
+            "mirage_app3_quick_colluding_sign_flip",
+            "mirage_app3_quick_min_max",
+            "mirage_app3_quick_min_sum",
+            "mirage_app3_quick_adaptive_stealth",
+            "mirage_app3_quick_heterogeneity_aware_mimicry",
+            "mirage_app3_quick_targeted_family_poisoning"
         )) {
             Write-Host ""
             Write-Host "Checking TOML -> Hydra translation: $DoctorName"
@@ -372,6 +383,28 @@ try {
             "synthetic_50k_lie",
             "synthetic_50k_gradient_mimicry",
             "synthetic_50k_colluding_sign_flip"
+        )
+        foreach ($Name in $Names) {
+            Invoke-Profile (Resolve-Profile $Name) -ValidateOnly:$DryRun
+        }
+        exit 0
+    }
+
+    if ($Suite -eq "mirage") {
+        $Names = @(
+            "mirage_app3_quick_clean",
+            "mirage_app3_quick_label_flip_targeted",
+            "mirage_app3_quick_sign_flip",
+            "mirage_app3_quick_model_scaling",
+            "mirage_app3_quick_gaussian_noise",
+            "mirage_app3_quick_lie",
+            "mirage_app3_quick_gradient_mimicry",
+            "mirage_app3_quick_colluding_sign_flip",
+            "mirage_app3_quick_min_max",
+            "mirage_app3_quick_min_sum",
+            "mirage_app3_quick_adaptive_stealth",
+            "mirage_app3_quick_heterogeneity_aware_mimicry",
+            "mirage_app3_quick_targeted_family_poisoning"
         )
         foreach ($Name in $Names) {
             Invoke-Profile (Resolve-Profile $Name) -ValidateOnly:$DryRun
