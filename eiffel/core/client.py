@@ -178,6 +178,11 @@ def mk_client_init_fn(seed: int) -> Callable[[], None]:
 
     def init_fn() -> None:
         set_seed(seed)
+        # Ray actors otherwise repeat TensorFlow retracing warnings for each virtual
+        # client. Keep real TensorFlow errors visible while the driver prints one
+        # compact Eiffel summary per FL round.
+        logging.getLogger("tensorflow").setLevel(logging.ERROR)
+        tf.get_logger().setLevel(logging.ERROR)
         # Enable GPU growth upon actor init
         # does nothing if `num_gpus` in client_resources is 0.0
         enable_tf_gpu_growth()
