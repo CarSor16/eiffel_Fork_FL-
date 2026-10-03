@@ -539,7 +539,8 @@ class InstrumentedFedAvg(FedAvg):
 
         parts = [
             f"Round {int(server_round)}/{int(self.num_rounds or server_round)}",
-            f"clients={fit_clients}/{fit_clients}",
+            f"fit_clients={fit_clients}",
+            f"eval_clients={len(results)}",
             (
                 "attack=none"
                 if mechanism == "none"
