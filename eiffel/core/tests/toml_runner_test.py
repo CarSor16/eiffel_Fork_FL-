@@ -208,7 +208,18 @@ def test_mirage_rejects_repartitioning():
     "profile_name",
     (
         "mirage_app3_quick_clean.toml",
+        "mirage_app3_quick_label_flip_targeted.toml",
         "mirage_app3_quick_sign_flip.toml",
+        "mirage_app3_quick_model_scaling.toml",
+        "mirage_app3_quick_gaussian_noise.toml",
+        "mirage_app3_quick_lie.toml",
+        "mirage_app3_quick_gradient_mimicry.toml",
+        "mirage_app3_quick_colluding_sign_flip.toml",
+        "mirage_app3_quick_min_max.toml",
+        "mirage_app3_quick_min_sum.toml",
+        "mirage_app3_quick_adaptive_stealth.toml",
+        "mirage_app3_quick_heterogeneity_aware_mimicry.toml",
+        "mirage_app3_quick_targeted_family_poisoning.toml",
     ),
 )
 def test_committed_mirage_profiles_translate(profile_name):
