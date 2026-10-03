@@ -152,6 +152,8 @@ class Pool:
                     p_task.fraction,
                     p_task.operation,
                     target_classes=attack.target,
+                    source_class=attack.source_class,
+                    destination_class=attack.destination_class,
                     seed=self.seed,
                 )
             self.shards[cid] = (_train_shard, _test_shards.pop())
