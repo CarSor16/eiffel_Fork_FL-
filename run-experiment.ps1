@@ -30,7 +30,17 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProfilesDir = Join-Path $Root "experiments\toml"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
-$LauncherVersion = "2026-09-28-posthoc-inference-2"
+$LauncherVersion = "2026-10-03-compact-logging-1"
+
+# Keep the console focused on experiment progress. This warning comes from Ray's
+# compatibility layer and is repeated once per worker; it does not affect the run.
+$KnownWarningFilter = "ignore:pkg_resources is deprecated as an API:UserWarning"
+if ([string]::IsNullOrWhiteSpace($env:PYTHONWARNINGS)) {
+    $env:PYTHONWARNINGS = $KnownWarningFilter
+} elseif ($env:PYTHONWARNINGS -notlike "*pkg_resources is deprecated as an API*") {
+    $env:PYTHONWARNINGS = "$($env:PYTHONWARNINGS),$KnownWarningFilter"
+}
+$env:TF_CPP_MIN_LOG_LEVEL = "2"
 
 function Get-Profiles {
     if (-not (Test-Path $ProfilesDir)) {
