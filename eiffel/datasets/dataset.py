@@ -283,6 +283,8 @@ class Dataset:
         # *,
         seed: int,
         target_classes: Optional[List[str]] = None,
+        source_class: int | None = None,
+        destination_class: int | None = None,
     ) -> int:
         """Increase or decrease the proportion of poisoned samples in the dataset.
 
