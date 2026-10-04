@@ -56,6 +56,16 @@ DATASETS = {
     "mirage_app3": "mirage/app3",
     "mirage-app3": "mirage/app3",
     "mirage-genai-2025": "mirage/app3",
+    "cesnet": "cesnet/quicext25_top50",
+    "cesnet_quicext25": "cesnet/quicext25_top50",
+    "cesnet-quicext-25": "cesnet/quicext25_top50",
+    "ciciot": "ciciot/family",
+    "ciciot_family": "ciciot/family",
+    "ciciot2023_family": "ciciot/family",
+    "ciciot_binary": "ciciot/binary",
+    "ciciot2023_binary": "ciciot/binary",
+    "ciciot_fine": "ciciot/fine",
+    "ciciot2023_fine": "ciciot/fine",
 }
 
 MODELS = {
@@ -318,6 +328,27 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         }
         or explicit_hydra_group == "mirage/app3"
     )
+    cesnet_preprocessed = (
+        dataset_name in {
+            "cesnet",
+            "cesnet_quicext25",
+            "cesnet-quicext-25",
+        }
+        or explicit_hydra_group == "cesnet/quicext25_top50"
+    )
+    ciciot_preprocessed = (
+        dataset_name in {
+            "ciciot",
+            "ciciot_family",
+            "ciciot2023_family",
+            "ciciot_binary",
+            "ciciot2023_binary",
+            "ciciot_fine",
+            "ciciot2023_fine",
+        }
+        or explicit_hydra_group.startswith("ciciot/")
+    )
+    fixed_preprocessed = mirage_app3 or cesnet_preprocessed or ciciot_preprocessed
     if total_clients < 1:
         raise TomlExperimentError("experiment.num_clients must be >= 1")
     if rounds < 1:
@@ -329,11 +360,13 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         raise TomlExperimentError(
             "dataset.task supports binary, family_aware, or multiclass."
         )
-    if task == "multiclass" and not (synthetic_stress or mirage_app3):
+    if task == "multiclass" and not (
+        synthetic_stress or fixed_preprocessed
+    ):
         raise TomlExperimentError(
-            "dataset.task=multiclass is currently supported by synthetic_stress "
-            "and MIRAGE app_3class. Real NF-V2 datasets remain on the binary "
-            "Eiffel baseline."
+            "dataset.task=multiclass is supported by synthetic_stress and the "
+            "fixed preprocessed MIRAGE/CESNET/CICIoT tasks. Real NF-V2 datasets "
+            "remain on the binary Eiffel baseline."
         )
 
     mechanism = str(attack.get("mechanism", "none")).lower()
@@ -432,12 +465,12 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
 
     # Partitioning.
     partition_type = str(partition.get("type", "iid")).lower()
-    if mirage_app3:
+    if fixed_preprocessed:
         if partition_type != "preassigned":
             raise TomlExperimentError(
-                "MIRAGE app_3class must use partition.type=preassigned so Eiffel "
-                "preserves the capture-aware non-IID client assignment produced "
-                "during preprocessing."
+                "Preprocessed MIRAGE/CESNET/CICIoT tasks must use "
+                "partition.type=preassigned so Eiffel preserves the fixed "
+                "leakage-safe logical-client assignment."
             )
         overrides.append("partitioner=preassigned")
     elif synthetic_stress:
@@ -520,10 +553,10 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
                     "Multiclass label_flip requires attack.source_class and "
                     "attack.destination_class."
                 )
-            if not mirage_app3:
+            if not fixed_preprocessed:
                 raise TomlExperimentError(
                     "Explicit multiclass label flipping is currently enabled only "
-                    "for MIRAGE app_3class."
+                    "for fixed preprocessed MIRAGE/CESNET/CICIoT tasks."
                 )
             source_class = int(attack["source_class"])
             destination_class = int(attack["destination_class"])
