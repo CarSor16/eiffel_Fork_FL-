@@ -167,10 +167,20 @@ class Pool:
 
         logical_ids = [record[0] for record in records]
         if len(logical_ids) != len(set(logical_ids)):
-            raise ConfigError(
-                "Logical client IDs are not unique across partitions: "
-                f"{logical_ids}."
-            )
+            if requested_malicious_ids:
+                raise ConfigError(
+                    "Explicit malicious_client_ids require unique logical client "
+                    f"IDs, got {logical_ids}."
+                )
+            # Historical/non-preassigned partitioners can split a dataset whose
+            # ClientHint metadata no longer identifies one logical client per shard.
+            # In that case preserve backward compatibility by using partition order.
+            records = [
+                (partition_idx, train_shard, test_shard)
+                for partition_idx, (_, train_shard, test_shard)
+                in enumerate(records)
+            ]
+            logical_ids = [record[0] for record in records]
 
         if requested_malicious_ids:
             missing = sorted(set(requested_malicious_ids) - set(logical_ids))
