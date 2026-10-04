@@ -152,11 +152,31 @@ def _quote_hydra_string(value: Any) -> str:
     return "'" + text.replace("'", "\\'") + "'"
 
 
+def _malicious_ids(attack: Mapping[str, Any]) -> list[int]:
+    raw = attack.get("malicious_client_ids")
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, (list, tuple)):
+        parsed = [int(value) for value in raw]
+    else:
+        parsed = [
+            int(item.strip())
+            for item in str(raw).split(",")
+            if item.strip()
+        ]
+    if len(parsed) != len(set(parsed)):
+        raise TomlExperimentError("attack.malicious_client_ids must be unique.")
+    if any(value < 0 for value in parsed):
+        raise TomlExperimentError(
+            "attack.malicious_client_ids must contain non-negative client IDs."
+        )
+    return parsed
+
+
 def _malicious_count(total_clients: int, attack: Mapping[str, Any]) -> int:
-    ids = str(attack.get("malicious_client_ids", "")).strip()
+    ids = _malicious_ids(attack)
     if ids:
-        parsed = [item.strip() for item in ids.split(",") if item.strip()]
-        return len(parsed)
+        return len(ids)
 
     fraction = float(attack.get("malicious_fraction", 0.0))
     if fraction <= 0.0:
@@ -377,6 +397,14 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
             "The TOML compatibility layer requires at least one benign client."
         )
     benign = total_clients - attackers
+    explicit_malicious_ids = _malicious_ids(attack)
+    if explicit_malicious_ids and any(
+        value >= total_clients for value in explicit_malicious_ids
+    ):
+        raise TomlExperimentError(
+            "attack.malicious_client_ids must be valid logical client IDs "
+            f"in [0, {total_clients - 1}]."
+        )
 
     overrides = [
         f"seed={int(experiment.get('seed', 1138))}",
@@ -385,6 +413,10 @@ def profile_to_overrides(profile: Mapping[str, Any]) -> list[str]:
         f"num_attackers={attackers}",
         f"+datasets={_dataset_group(dataset)}",
     ]
+
+    if explicit_malicious_ids:
+        ids_value = ",".join(str(value) for value in explicit_malicious_ids)
+        overrides.append(f"++malicious_client_ids=[{ids_value}]")
 
     if synthetic_stress:
         overrides.append(
