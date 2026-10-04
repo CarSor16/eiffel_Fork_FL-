@@ -312,7 +312,13 @@ try {
             "mirage_app3_quick_min_sum",
             "mirage_app3_quick_adaptive_stealth",
             "mirage_app3_quick_heterogeneity_aware_mimicry",
-            "mirage_app3_quick_targeted_family_poisoning"
+            "mirage_app3_quick_targeted_family_poisoning",
+            "cesnet_top50_clean",
+            "cesnet_top50_label_flip_targeted",
+            "ciciot_binary_clean",
+            "ciciot_family_clean",
+            "ciciot_family_label_flip_targeted",
+            "ciciot_fine_clean"
         )) {
             Write-Host ""
             Write-Host "Checking TOML -> Hydra translation: $DoctorName"
