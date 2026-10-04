@@ -94,8 +94,22 @@ function Invoke-Profile([string]$Path, [switch]$ValidateOnly) {
             $HydraOverrides | Where-Object { $_ -like "hydra.run.dir=*" }
         ).Count -gt 0
     }
-    if ($ProfileBaseName -like "mirage_*" -and -not $HasExplicitRunDir) {
-        $Args += 'hydra.run.dir=${anchor:}/outputs/mirage/${now:%Y-%m-%d}/${now:%H-%M-%S}'
+    if (-not $HasExplicitRunDir) {
+        $DatasetRunRoot = $null
+        if ($ProfileBaseName -like "mirage_*") {
+            $DatasetRunRoot = "mirage"
+        } elseif ($ProfileBaseName -like "cesnet_top50_*") {
+            $DatasetRunRoot = "cesnet/top50"
+        } elseif ($ProfileBaseName -like "ciciot_binary_*") {
+            $DatasetRunRoot = "ciciot/binary"
+        } elseif ($ProfileBaseName -like "ciciot_family_*") {
+            $DatasetRunRoot = "ciciot/family"
+        } elseif ($ProfileBaseName -like "ciciot_fine_*") {
+            $DatasetRunRoot = "ciciot/fine"
+        }
+        if ($DatasetRunRoot) {
+            $Args += 'hydra.run.dir=${anchor:}/outputs/' + $DatasetRunRoot + '/${now:%Y-%m-%d}/${now:%H-%M-%S}'
+        }
     }
 
     if ($HydraOverrides) {
@@ -360,12 +374,21 @@ try {
     if ($Analyze -or $AnalyzeDetailed) {
         $EffectiveRunsRoot = $RunsRoot
         $EffectiveAnalysisOutput = $AnalysisOutput
-        if ($Suite -eq "mirage") {
+        $SuiteSubdir = $null
+        switch ($Suite) {
+            "mirage" { $SuiteSubdir = "mirage" }
+            "cesnet" { $SuiteSubdir = "cesnet\top50" }
+            "ciciot-binary" { $SuiteSubdir = "ciciot\binary" }
+            "ciciot-family" { $SuiteSubdir = "ciciot\family" }
+            "ciciot-fine" { $SuiteSubdir = "ciciot\fine" }
+            "ciciot-all" { $SuiteSubdir = "ciciot" }
+        }
+        if ($SuiteSubdir) {
             if ($RunsRoot -eq "outputs") {
-                $EffectiveRunsRoot = "outputs\mirage"
+                $EffectiveRunsRoot = Join-Path "outputs" $SuiteSubdir
             }
             if ($AnalysisOutput -eq "analysis-results") {
-                $EffectiveAnalysisOutput = "analysis-results\mirage"
+                $EffectiveAnalysisOutput = Join-Path "analysis-results" $SuiteSubdir
             }
         }
 
