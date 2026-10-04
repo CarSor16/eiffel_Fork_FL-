@@ -457,6 +457,41 @@ try {
         exit 0
     }
 
+    $CoreAttackSuffixes = @(
+        "clean",
+        "label_flip_targeted",
+        "sign_flip",
+        "model_scaling",
+        "gaussian_noise",
+        "lie",
+        "gradient_mimicry",
+        "colluding_sign_flip",
+        "min_max",
+        "min_sum",
+        "adaptive_stealth",
+        "heterogeneity_aware_mimicry",
+        "targeted_family_poisoning"
+    )
+
+    if ($Suite -eq "cesnet") {
+        foreach ($Suffix in $CoreAttackSuffixes) {
+            Invoke-Profile (Resolve-Profile ("cesnet_top50_" + $Suffix)) -ValidateOnly:$DryRun
+        }
+        exit 0
+    }
+
+    if ($Suite -in @("ciciot-binary", "ciciot-family", "ciciot-fine", "ciciot-all")) {
+        $Prefixes = @()
+        if ($Suite -in @("ciciot-binary", "ciciot-all")) { $Prefixes += "ciciot_binary" }
+        if ($Suite -in @("ciciot-family", "ciciot-all")) { $Prefixes += "ciciot_family" }
+        if ($Suite -in @("ciciot-fine", "ciciot-all")) { $Prefixes += "ciciot_fine" }
+        foreach ($Prefix in $Prefixes) {
+            foreach ($Suffix in $CoreAttackSuffixes) {
+                Invoke-Profile (Resolve-Profile ($Prefix + "_" + $Suffix)) -ValidateOnly:$DryRun
+            }
+        }
+        exit 0
+    }
     if ($Suite -eq "advanced") {
         $Names = @(
             "synthetic_50k_min_max",
