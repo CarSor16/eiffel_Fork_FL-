@@ -34,6 +34,8 @@ DEFAULT_METRICS = (
     "recall",
     "missrate",
     "mcc",
+    "macro_class_recall",
+    "min_class_recall",
     "macro_attack_recall",
     "min_attack_recall",
 )
