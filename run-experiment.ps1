@@ -19,7 +19,7 @@ param(
     [string]$ValidateHdf5 = "",
     [int]$MaxConcurrentClients = 0,
 
-    [ValidateSet("none", "synthetic50k", "multiclass", "advanced", "mirage", "datacenter-cicids", "datacenter-nb15", "datacenter-all")]
+    [ValidateSet("none", "synthetic50k", "multiclass", "advanced", "mirage", "cesnet", "ciciot-binary", "ciciot-family", "ciciot-fine", "ciciot-all", "datacenter-cicids", "datacenter-nb15", "datacenter-all")]
     [string]$Suite = "none",
 
     [Parameter(ValueFromRemainingArguments=$true)]
@@ -30,7 +30,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProfilesDir = Join-Path $Root "experiments\toml"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
-$LauncherVersion = "2026-10-03-compact-logging-1"
+$LauncherVersion = "2026-10-04-real-datasets-1"
 
 # Keep the console focused on experiment progress. This warning comes from Ray's
 # compatibility layer and is repeated once per worker; it does not affect the run.
