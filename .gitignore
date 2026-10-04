@@ -197,3 +197,5 @@ data/nfv2/sampled/*.csv.gz
 
 # Preprocessed MIRAGE datasets are local experiment data.
 data/mirage/
+data/cesnet/
+data/ciciot/
