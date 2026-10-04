@@ -267,6 +267,13 @@ class EiffelClient(NumPyClient):
 
         probe_x = test_set.X.iloc[positions].to_numpy()
         probe_y = test_set.y.iloc[positions].to_numpy()
+        if bool(config.get("probe_original_labels", False)):
+            # Label-flip schedules mutate y. Persist original truth so the fixed
+            # training probe remains aligned across rounds and with class names.
+            for column in ("ClassId", "Label"):
+                if column in test_set.m.columns:
+                    probe_y = test_set.m[column].iloc[positions].to_numpy()
+                    break
         capture_logits = bool(config.get("capture_logits", True))
         if capture_logits:
             probabilities, logits = predict_probabilities_and_logits(
@@ -406,14 +413,21 @@ class EiffelClient(NumPyClient):
                 data_poison_effective_fraction
             )
 
-        # Capture a compact deterministic probe. Flower metrics only accept scalar
-        # payloads, so arrays are encoded transiently and decoded by the strategy.
+        # Attack construction may observe local training data, never held-out test.
+        # Flower scalar metrics carry the encoded arrays to the strategy.
         if bool(config.get("capture_inference", False)):
-            test_set: Dataset = ray.get(self.data_holder.get.remote("test"))
-            ret.update(self._capture_probe_payload(test_set, config))
+            ret.update(self._capture_probe_payload(
+                train_set, dict(config, probe_original_labels=True)
+            ))
+            ret["_eiffel_probe_source"] = "train"
 
         if self.eval_fit:
-            test_loss, _, metrics = self.evaluate(self.model.get_weights(), config)
+            # Diagnostic test metrics must not overwrite the training probe with
+            # test probabilities consumed by the targeted-poisoning strategy.
+            evaluation_config = dict(config, capture_inference=False)
+            test_loss, _, metrics = self.evaluate(
+                self.model.get_weights(), evaluation_config
+            )
             ret.update(metrics)
             ret["fit"] = json.dumps({
                 "test_loss": test_loss,
@@ -497,6 +511,10 @@ class EiffelClient(NumPyClient):
 
         if multiclass:
             labels = sorted(int(v) for v in np.unique(y_true))
+            # A source-file split may omit some training classes from test.
+            # Keep every model output in the confusion matrix so predictions
+            # of an unobserved test class are still counted as errors.
+            model_labels = list(range(inference_array.shape[-1]))
             precision, recall, f1, support = precision_recall_fscore_support(
                 y_true,
                 y_pred,
@@ -527,12 +545,20 @@ class EiffelClient(NumPyClient):
                     attack_recalls.append(recall_value)
             return_data["global"] = {
                 "accuracy": float(np.mean(y_pred == y_true)),
-                "macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
+                # Fixed observed-test domain across clean/attack, regardless of
+                # which absent classes are predicted by a particular model.
+                "macro_f1": float(np.mean(f1)),
+                "macro_f1_all_model_classes": float(
+                    f1_score(y_true, y_pred, labels=model_labels,
+                             average="macro", zero_division=0)
+                ),
                 "weighted_f1": float(
                     f1_score(y_true, y_pred, average="weighted", zero_division=0)
                 ),
                 "mcc": float(matthews_corrcoef(y_true, y_pred)),
-                "num_classes": float(len(labels)),
+                "num_classes": float(len(model_labels)),
+                "num_observed_test_classes": float(len(labels)),
+                "test_class_coverage": float(len(labels) / len(model_labels)),
                 "loss": float(loss),
                 "macro_class_recall": float(np.mean(class_recalls)),
                 "min_class_recall": float(np.min(class_recalls)),
@@ -553,10 +579,25 @@ class EiffelClient(NumPyClient):
                     }
                 )
             return_data["confusion_matrix"] = confusion_matrix(
-                y_true, y_pred, labels=labels
+                y_true, y_pred, labels=model_labels
             ).tolist()
+            return_data["confusion_matrix_labels"] = model_labels
+            return_data["unobserved_test_class_ids"] = sorted(
+                set(model_labels) - set(labels)
+            )
         else:
             # Binary Benign-vs-Attack training with per-family recall/miss-rate.
+            precision, recall, f1, support = precision_recall_fscore_support(
+                y_true, y_pred, labels=[0, 1], zero_division=0
+            )
+            for class_id, name in enumerate(("Benign", "Attack")):
+                if support[class_id] > 0:
+                    return_data[name] = {
+                        "precision": float(precision[class_id]),
+                        "recall": float(recall[class_id]),
+                        "f1": float(f1[class_id]),
+                        "support": int(support[class_id]),
+                    }
             attack_recalls = []
             attack_missrates = []
             for label in (name for name in class_df.unique() if name != "Benign"):
@@ -571,33 +612,39 @@ class EiffelClient(NumPyClient):
                 missrate_value = float(fn / denom) if denom else 0.0
                 attack_recalls.append(recall_value)
                 attack_missrates.append(missrate_value)
-                return_data[label] = {
+                return_data.setdefault(label, {}).update({
                     "recall": recall_value,
                     "missrate": missrate_value,
                     "support": int(mask.sum()),
-                }
+                })
 
             benign_mask = class_df == "Benign"
             if bool(benign_mask.any()):
                 benign_pred = y_pred[benign_mask]
                 false_positive_rate = float(np.mean(benign_pred == 1))
-                return_data["Benign"] = {
+                return_data.setdefault("Benign", {}).update({
                     "false_positive_rate": false_positive_rate,
                     "specificity": 1.0 - false_positive_rate,
                     "support": int(benign_mask.sum()),
-                }
+                })
 
             tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=(0, 1)).ravel()
             return_data["global"] = metrics_from_confmat(tn, fp, fn, tp)
             return_data["global"].update(
                 {
                     "macro_f1": float(
-                        f1_score(y_true, y_pred, average="macro", zero_division=0)
+                        np.mean(f1[support > 0])
                     ),
+                    "macro_f1_all_model_classes": float(np.mean(f1)),
                     "weighted_f1": float(
                         f1_score(y_true, y_pred, average="weighted", zero_division=0)
                     ),
                     "mcc": float(matthews_corrcoef(y_true, y_pred)),
+                    "macro_class_recall": float(np.mean(recall[support > 0])),
+                    "min_class_recall": float(np.min(recall[support > 0])),
+                    "num_classes": 2.0,
+                    "num_observed_test_classes": float(np.count_nonzero(support)),
+                    "test_class_coverage": float(np.count_nonzero(support) / 2),
                 }
             )
             if attack_recalls:
@@ -609,12 +656,16 @@ class EiffelClient(NumPyClient):
                     }
                 )
             return_data["global"]["loss"] = float(loss)
+            return_data["confusion_matrix"] = [[int(tn), int(fp)], [int(fn), int(tp)]]
+            return_data["confusion_matrix_labels"] = [0, 1]
+            return_data["unobserved_test_class_ids"] = np.flatnonzero(support == 0).tolist()
 
         return_data["_cid"] = self.cid
 
         metrics_payload = {k: json.dumps(v) for k, v in return_data.items()}
         if bool(config.get("capture_inference", False)):
             metrics_payload.update(self._capture_probe_payload(test_set, config))
+            metrics_payload["_eiffel_probe_source"] = "test"
         return (loss, len(test_set), metrics_payload)
 
     def poison(self, task: PoisonTask) -> None:

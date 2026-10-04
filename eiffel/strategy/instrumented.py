@@ -206,8 +206,13 @@ class InstrumentedFedAvg(FedAvg):
         probe_features: list[np.ndarray | None] = []
         probe_labels: list[np.ndarray | None] = []
         probe_families: list[list[str] | None] = []
+        probe_sources: list[str] = []
 
         for client, fit_res in results:
+            probe_source = str(fit_res.metrics.pop("_eiffel_probe_source", "test"))
+            if probe_source not in {"train", "test"}:
+                raise RuntimeError(f"Unsupported fit probe source: {probe_source!r}")
+            probe_sources.append(probe_source)
             clients.append(client)
             logical_cids.append(
                 self._logical_cid(fit_res.metrics, str(client.cid))
@@ -291,6 +296,14 @@ class InstrumentedFedAvg(FedAvg):
         model_mechanism = str(
             self.attack_cfg.get("mechanism", "none")
         ).strip().lower()
+        if model_mechanism == "targeted_family_poisoning" and any(
+            malicious and source != "train"
+            for malicious, source in zip(malicious_mask, probe_sources)
+        ):
+            raise RuntimeError(
+                "targeted_family_poisoning requires a local training probe; "
+                "test-set or unspecified attack probes are forbidden."
+            )
         configured_data_attacks = {
             attack
             for attack, malicious in zip(
@@ -391,6 +404,7 @@ class InstrumentedFedAvg(FedAvg):
                 probe_features=probe_features[idx],
                 probe_labels=probe_labels[idx],
                 probe_families=probe_families[idx],
+                probe_split=probe_sources[idx],
                 malicious=malicious,
                 attack_active=client_attack_active,
                 mechanism=client_mechanism,

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/fl-security-lab
+      - codex/research-integrity-20261004
   workflow_dispatch:
 
 concurrency:
@@ -48,6 +49,8 @@ jobs:
         run: >
           python -m pytest -q
           eiffel/core/tests/client_test.py
+          eiffel/core/tests/missing_test_classes_test.py
+          eiffel/core/tests/research_integrity_test.py
           eiffel/core/tests/model_attacks_test.py
           eiffel/core/tests/label_flip_attack_test.py
           eiffel/core/tests/multiclass_models_test.py

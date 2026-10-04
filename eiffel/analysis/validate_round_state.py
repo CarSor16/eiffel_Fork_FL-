@@ -269,33 +269,35 @@ def validate(path: Path) -> list[str]:
                     f"round is {highest}"
                 )
 
-        if "probe" in h5:
-            probe = h5["probe"]
+        for probe_name in ("probe", "fit_probe"):
+            if probe_name not in h5:
+                continue
+            probe = h5[probe_name]
             probe_size = None
             if "features" in probe:
                 features = np.asarray(probe["features"])
                 probe_size = int(features.shape[0]) if features.ndim else 0
                 if features.dtype != np.float32:
                     errors.append(
-                        f"probe features dtype {features.dtype} != float32"
+                        f"{probe_name} features dtype {features.dtype} != float32"
                     )
                 if not np.all(np.isfinite(features)):
-                    errors.append("probe features contain NaN/inf")
+                    errors.append(f"{probe_name} features contain NaN/inf")
             if "labels" in probe:
                 labels = np.asarray(probe["labels"])
                 if labels.dtype != np.int16:
                     errors.append(
-                        f"probe labels dtype {labels.dtype} != int16"
+                        f"{probe_name} labels dtype {labels.dtype} != int16"
                     )
                 if probe_size is not None and labels.shape[0] != probe_size:
                     errors.append(
-                        "probe labels/features have different sample counts"
+                        f"{probe_name} labels/features have different sample counts"
                     )
             if "families" in probe and probe_size is not None:
                 families = np.asarray(probe["families"])
                 if families.shape[0] != probe_size:
                     errors.append(
-                        "probe families/features have different sample counts"
+                        f"{probe_name} families/features have different sample counts"
                     )
 
         if "global_inference" in h5:

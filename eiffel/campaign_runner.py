@@ -13,6 +13,7 @@ import copy
 import csv
 import itertools
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -217,11 +218,32 @@ def main(argv: list[str] | None = None) -> int:
     manifest_path = output_root / "campaign_manifest.csv"
 
     rows: list[dict[str, str]] = []
+    fieldnames = [
+        "variant", "seed", "mechanism", "malicious_client_ids",
+        "malicious_fraction", "schedule", "output_dir", "return_code", "command",
+    ]
+
+    def checkpoint() -> None:
+        # A stopped process must leave the last completed manifest intact.
+        temporary = manifest_path.with_suffix(".csv.tmp")
+        with temporary.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(manifest_path)
+
+    checkpoint()
     failed = 0
     print(f"Campaign variants: {len(variants)}")
     for index, profile in enumerate(variants, 1):
         fields = _variant_fields(profile, index)
         variant_dir = output_root / fields["variant"]
+        variant_dir.mkdir(parents=True, exist_ok=True)
+        (variant_dir / "campaign_profile.json").write_text(
+            json.dumps(profile, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         command = _command(
             profile,
             output_dir=variant_dir,
@@ -241,31 +263,30 @@ def main(argv: list[str] | None = None) -> int:
             print(fields["command"])
             fields["return_code"] = "dry-run"
         else:
-            completed = subprocess.run(command, check=False)
+            fields["return_code"] = "running"
+            rows.append(fields)
+            checkpoint()
+            try:
+                completed = subprocess.run(command, check=False)
+            except KeyboardInterrupt:
+                fields["return_code"] = "interrupted"
+                checkpoint()
+                print(f"Interrupted; campaign checkpoint: {manifest_path}")
+                return 130
+            except Exception:
+                fields["return_code"] = "launch-error"
+                checkpoint()
+                raise
             fields["return_code"] = str(completed.returncode)
+            checkpoint()
             if completed.returncode != 0:
                 failed += 1
-                rows.append(fields)
                 if not args.continue_on_error:
                     break
                 continue
-        rows.append(fields)
-
-    fieldnames = [
-        "variant",
-        "seed",
-        "mechanism",
-        "malicious_client_ids",
-        "malicious_fraction",
-        "schedule",
-        "output_dir",
-        "return_code",
-        "command",
-    ]
-    with manifest_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+        if args.dry_run:
+            rows.append(fields)
+            checkpoint()
 
     print("")
     print(f"Campaign manifest: {manifest_path}")

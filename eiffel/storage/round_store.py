@@ -165,17 +165,19 @@ class RoundStore:
         features: np.ndarray | None = None,
         labels: np.ndarray | None = None,
         families: Sequence[str] | None = None,
+        split: str = "test",
     ) -> None:
         """Persist a deterministic probe once, with per-client fallback when needed.
 
-        The canonical /probe datasets represent the first observed probe.  With the
-        default common-test setup every client hard-links to those datasets without
-        duplicating bytes.  If a project uses client-specific test sets, only the
-        differing client probe is stored separately below /probe/clients/<cid>.
+        Evaluation keeps the historical /probe namespace; local training probes
+        live in /fit_probe. Identical probes within each split share hard links.
         """
         if self._h5 is None:
             return
-        probe = self._h5.require_group("probe")
+        if split not in {"train", "test"}:
+            raise ValueError(f"Unsupported probe split: {split!r}")
+        probe = self._h5.require_group("fit_probe" if split == "train" else "probe")
+        probe.attrs["split"] = split
         client_probe = probe.require_group("clients").require_group(_safe(cid))
 
         def numeric(name: str, value: np.ndarray | None, dtype: str) -> None:
@@ -288,6 +290,7 @@ class RoundStore:
         probe_features: np.ndarray | None = None,
         probe_labels: np.ndarray | None = None,
         probe_families: Sequence[str] | None = None,
+        probe_split: str = "test",
         malicious: bool = False,
         attack_active: bool = False,
         mechanism: str = "none",
@@ -344,6 +347,7 @@ class RoundStore:
             features=probe_features,
             labels=probe_labels,
             families=probe_families,
+            split=probe_split,
         )
 
     def mark_round_complete(self, server_round: int) -> None:
