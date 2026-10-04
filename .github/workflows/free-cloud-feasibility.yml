@@ -1,4 +1,4 @@
-name: Free cloud feasibility
+name: Free MIRAGE feasibility
 
 on:
   push:
@@ -6,7 +6,6 @@ on:
       - codex/free-cloud-research-20261004
     paths:
       - .github/workflows/free-cloud-feasibility.yml
-      - scripts/research/cloud_probe.py
   workflow_dispatch:
 
 permissions:
@@ -14,31 +13,27 @@ permissions:
 
 concurrency:
   group: free-cloud-feasibility-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  full-synthetic-clean:
+  mirage-input-check:
     if: github.event.repository.private == false
     runs-on: ubuntu-22.04
-    timeout-minutes: 70
+    timeout-minutes: 5
     env:
-      CUDA_VISIBLE_DEVICES: "-1"
-      TF_CPP_MIN_LOG_LEVEL: "2"
-      TF_NUM_INTRAOP_THREADS: "1"
-      TF_NUM_INTEROP_THREADS: "1"
-      OMP_NUM_THREADS: "1"
-      MPLBACKEND: Agg
+      MIRAGE_DATA_URL: ${{ secrets.EIFFEL_MIRAGE_URL }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-      - name: Install the pinned research stack
+      - name: Require the real preprocessed MIRAGE snapshot
+        shell: bash
         run: |
-          python -m pip install --upgrade "pip<25"
-          python -m pip install -c constraints-py310.txt -e .
-          python -m pip check
-      - name: Validate full synthetic clean, 30 rounds, 50000 training samples
-        run: python scripts/research/cloud_probe.py
-      # No artifact upload or dependency cache: no extra storage is reserved.
-      # Numeric evidence is printed into the job log and summary.
+          python3 - <<'DATA_CHECK'
+          import os
+          from urllib.parse import urlsplit
+          value = os.environ.get('MIRAGE_DATA_URL', '').strip()
+          if not value:
+              raise SystemExit('MIRAGE real training not started: attach the preprocessed Parquet ZIP or supply EIFFEL_MIRAGE_URL. No synthetic substitute is permitted.')
+          if urlsplit(value).scheme != 'https':
+              raise SystemExit('MIRAGE real training not started: the download source must use HTTPS.')
+          print('A MIRAGE download source is configured. Its contents and checksum must be validated before any training.')
+          DATA_CHECK
+      # No artifact uploads, cache reservations, larger runners or synthetic training.
