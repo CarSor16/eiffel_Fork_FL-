@@ -664,3 +664,56 @@ name = "fedavg"
     assert rc == 0
     output = capsys.readouterr().out
     assert "++experiment.max_concurrent_clients=2" in output
+
+
+@pytest.mark.parametrize(
+    ("prefix", "dataset_override", "task", "num_classes"),
+    (
+        ("cesnet_top50_", "+datasets=cesnet/quicext25_top50", "multiclass", 50),
+        ("ciciot_family_", "+datasets=ciciot/family", "multiclass", 8),
+        ("ciciot_binary_", "+datasets=ciciot/binary", "binary", 2),
+        ("ciciot_fine_", "+datasets=ciciot/fine", "multiclass", 34),
+    ),
+)
+def test_committed_preprocessed_real_profiles_translate(
+    prefix,
+    dataset_override,
+    task,
+    num_classes,
+):
+    root = Path(__file__).resolve().parents[3]
+    paths = sorted((root / "experiments" / "toml").glob(f"{prefix}*.toml"))
+    assert len(paths) == 13
+
+    for path in paths:
+        overrides = profile_to_overrides(load_profile(path))
+        assert dataset_override in overrides
+        assert "partitioner=preassigned" in overrides
+        if task == "multiclass":
+            assert "++model.task=multiclass" in overrides
+            assert f"++model.num_classes={num_classes}" in overrides
+
+
+def test_explicit_malicious_client_ids_are_forwarded():
+    profile = {
+        "experiment": {"seed": 2026, "num_clients": 10, "rounds": 30},
+        "dataset": {
+            "name": "ciciot_family",
+            "task": "multiclass",
+            "num_classes": 8,
+        },
+        "partition": {"type": "preassigned"},
+        "model": {"name": "p4p_mlp"},
+        "attack": {
+            "mechanism": "sign_flip",
+            "malicious_client_ids": [3, 7],
+            "strength": 3.0,
+        },
+        "aggregation": {"name": "fedavg"},
+    }
+
+    overrides = profile_to_overrides(profile)
+
+    assert "num_clients=8" in overrides
+    assert "num_attackers=2" in overrides
+    assert "++malicious_client_ids=[3,7]" in overrides
