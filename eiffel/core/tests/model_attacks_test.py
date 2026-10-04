@@ -460,3 +460,47 @@ def test_targeted_family_poisoning_fails_fast_for_missing_dataset_metadata():
             probe_labels=labels,
             probe_families=families,
         )
+
+
+def test_targeted_family_poisoning_supports_class_id_selector():
+    original = _alternate_layout_updates()
+    labels = [np.array([0, 2, 2, 1], dtype=np.int16) for _ in original]
+    families = [["dynamic-a", "dynamic-b", "dynamic-b", "dynamic-c"] for _ in original]
+    inferences = [
+        np.array(
+            [
+                [0.8, 0.1, 0.1],
+                [0.1, 0.2, 0.7],
+                [0.1, 0.2, 0.7],
+                [0.1, 0.8, 0.1],
+            ],
+            dtype=np.float32,
+        )
+        for _ in original
+    ]
+    inferences[3] = inferences[3].copy()
+    inferences[3][1:3, 2] = 0.10
+    inferences[4] = inferences[4].copy()
+    inferences[4][1:3, 2] = 0.50
+
+    attacked, _ = apply_round_attack(
+        original,
+        [False, False, False, True, True],
+        _cfg(
+            "targeted_family_poisoning",
+            target_family="class_id:2",
+            target_amplification=1.5,
+        ),
+        server_round=1,
+        total_rounds=5,
+        seed=7,
+        probe_inferences=inferences,
+        probe_labels=labels,
+        probe_families=families,
+    )
+
+    _assert_layout_and_finite(original, attacked)
+    assert any(
+        not np.array_equal(before, after)
+        for before, after in zip(original[3], attacked[3])
+    )
