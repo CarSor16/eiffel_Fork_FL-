@@ -192,40 +192,105 @@ data/
 
 The dataset files themselves are not bundled in this repository.
 
-MIRAGE-GenAI-2025 app-classification profiles expect the preprocessing-kit outputs at:
+The three preprocessed thesis datasets are kept outside Git and are expected under:
 
 ```text
 data/
-└── mirage/
-    └── tasks/
-        └── app_3class/
-            ├── train_scaled_with_clients.parquet
-            └── test_scaled.parquet
+├── mirage/
+│   └── tasks/
+│       └── app_3class/
+│           ├── train_scaled_with_clients.parquet
+│           └── test_scaled.parquet
+├── cesnet/
+│   ├── train_scaled.parquet
+│   ├── validation_scaled.parquet
+│   ├── test_scaled.parquet
+│   ├── manifest.json
+│   └── clients/
+│       ├── client_00.parquet
+│       └── ... client_09.parquet
+└── ciciot/
+    ├── train_scaled.parquet
+    ├── validation_scaled.parquet
+    ├── test_scaled.parquet
+    ├── manifest.json
+    └── clients/
+        ├── client_00.parquet
+        └── ... client_09.parquet
 ```
 
-The MIRAGE loader uses only the numeric `f__*` columns as model inputs, preserves
-`client_id` as Eiffel's preassigned logical-client partition, and keeps the processed
-test split common to all clients. The dataset directory is ignored by Git.
+The loaders never refit preprocessing and never repartition these datasets. They
+preserve the leakage-safe train/test split and the ten logical FL clients created by
+the preprocessing kits. Validation data is intentionally kept outside federated
+training/test execution.
 
-Validate and run the local five-round baseline with:
+Prepared tasks are:
+
+- MIRAGE: 3-class ChatGPT/Copilot/Gemini classification.
+- CESNET-QUICEXT-25 monthly raw fallback: top-50 registrable-domain classification.
+  This is not the curated DataZoo application-label task.
+- CICIoT2023 binary: Benign vs Attack, while retaining attack-family metadata.
+- CICIoT2023 family: 8-class family classification.
+- CICIoT2023 fine: 34-class fine-grained classification.
+
+All real-dataset core profiles run for 30 FL rounds. Validate a whole suite without
+training:
 
 ```powershell
-.\run.cmd mirage_app3_quick_clean -DryRun
-.\run.cmd mirage_app3_quick_clean -MaxConcurrentClients 2
+.\run.cmd -Suite mirage -DryRun
+.\run.cmd -Suite cesnet -DryRun
+.\run.cmd -Suite ciciot-family -DryRun
+.\run.cmd -Suite ciciot-binary -DryRun
+.\run.cmd -Suite ciciot-fine -DryRun
 ```
 
-A matching Sign Flip smoke profile is available as:
+Run the suites:
 
 ```powershell
-.\run.cmd mirage_app3_quick_sign_flip -MaxConcurrentClients 2
+.\run.cmd -Suite mirage
+.\run.cmd -Suite cesnet
+.\run.cmd -Suite ciciot-family
+.\run.cmd -Suite ciciot-binary
+.\run.cmd -Suite ciciot-fine
 ```
+
+On a constrained local machine you can append, for example,
+`-MaxConcurrentClients 2`. In Work/server environments, omit that option: Ray will
+use the maximum safe concurrency supported by the available CPU/GPU resources.
+
+Each suite includes clean, targeted label flip, Sign Flip, Model Scaling, Gaussian
+Noise, LIE, Gradient Mimicry, Colluding Sign Flip, Min-Max, Min-Sum, Adaptive
+Stealth, Heterogeneity-Aware Mimicry, and Targeted Family Poisoning.
+
+CICIoT can run all three tasks sequentially with:
+
+```powershell
+.\run.cmd -Suite ciciot-all
+```
+
+Analysis is dataset-scoped to avoid mixing incompatible clean baselines:
+
+```powershell
+.\run.cmd -Suite mirage -AnalyzeDetailed
+.\run.cmd -Suite cesnet -AnalyzeDetailed
+.\run.cmd -Suite ciciot-family -AnalyzeDetailed
+.\run.cmd -Suite ciciot-all -AnalyzeDetailed
+```
+
+For multi-seed, explicit-attacker, strength and schedule sweeps, use
+`python -m eiffel.campaign_runner`; examples are documented in
+`docs/REAL_DATASET_CAMPAIGNS.md`.
 
 ### Where results are saved
 
-Hydra creates one run directory under:
+Hydra creates one run directory under a dataset-scoped tree. Examples:
 
 ```text
-outputs/YYYY-MM-DD/HH-MM-SS/
+outputs/mirage/YYYY-MM-DD/HH-MM-SS/
+outputs/cesnet/top50/YYYY-MM-DD/HH-MM-SS/
+outputs/ciciot/binary/YYYY-MM-DD/HH-MM-SS/
+outputs/ciciot/family/YYYY-MM-DD/HH-MM-SS/
+outputs/ciciot/fine/YYYY-MM-DD/HH-MM-SS/
 ```
 
 Typical run artifacts include `stats.json`, Hydra's `.hydra/` configuration files, normal Eiffel metrics, and—when instrumented storage is enabled—`round_state.h5`.
