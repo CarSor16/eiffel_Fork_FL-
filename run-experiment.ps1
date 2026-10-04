@@ -374,6 +374,25 @@ try {
         exit 0
     }
 
+    if (($Analyze -or $AnalyzeDetailed) -and $Suite -eq "ciciot-all") {
+        foreach ($Task in @("binary", "family", "fine")) {
+            $TaskRuns = Join-Path $Root ("outputs\ciciot\" + $Task)
+            $TaskOutput = Join-Path $Root ("analysis-results\ciciot\" + $Task)
+            if ($AnalyzeDetailed) {
+                Write-Host "Generating detailed CICIoT $Task analysis..."
+                & $Python -m eiffel.analysis.compare_metrics --runs-root $TaskRuns --output-dir $TaskOutput
+            } else {
+                Write-Host "Generating compact CICIoT $Task analysis..."
+                & $Python -m eiffel.analysis.compact_round_analysis --runs-root $TaskRuns --output-dir $TaskOutput
+            }
+            if ($LASTEXITCODE -ne 0) {
+                throw "CICIoT $Task metric analysis failed."
+            }
+        }
+        Write-Host ""
+        Write-Host "CICIoT analyses written under: $(Join-Path $Root 'analysis-results\ciciot')"
+        exit 0
+    }
     if ($Analyze -or $AnalyzeDetailed) {
         $EffectiveRunsRoot = $RunsRoot
         $EffectiveAnalysisOutput = $AnalysisOutput
