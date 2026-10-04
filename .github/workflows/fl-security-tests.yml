@@ -35,6 +35,7 @@ jobs:
       - name: Synthetic client and Flower smoke tests
         run: >
           python -m pytest -q -s
+          --junitxml=ci-evidence/smoke.xml --basetemp=ci-evidence/smoke
           eiffel/core/tests/synthetic_client_integration_test.py
           eiffel/core/tests/synthetic_flower_integration_test.py
           eiffel/core/tests/advanced_attacks_integration_test.py
@@ -43,11 +44,13 @@ jobs:
         if: runner.os == 'Linux'
         run: >
           python -m pytest -q -s
+          --junitxml=ci-evidence/profiles.xml --basetemp=ci-evidence/profiles
           eiffel/core/tests/current_profiles_integration_test.py
 
       - name: Focused FL-security suite
         run: >
           python -m pytest -q
+          --junitxml=ci-evidence/regression.xml --basetemp=ci-evidence/regression
           eiffel/core/tests/client_test.py
           eiffel/core/tests/missing_test_classes_test.py
           eiffel/core/tests/research_integrity_test.py
@@ -70,3 +73,12 @@ jobs:
           eiffel/datasets/tests/preprocessed_network_test.py
           eiffel/datasets/tests/partitioners_test.py
           eiffel/datasets/tests/poisoning_test.py
+
+      - name: Preserve test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fl-security-evidence-${{ matrix.os }}
+          path: ci-evidence/
+          include-hidden-files: true
+          retention-days: 14

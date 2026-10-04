@@ -12,6 +12,9 @@ import h5py
 from eiffel.core.client import EiffelClient
 from eiffel.datasets.preprocessed_network import PreprocessedNetworkDataset
 from eiffel.storage.round_store import RoundStore
+from eiffel.storage import decode_array
+from eiffel.strategy.instrumented import InstrumentedFedAvg
+from flwr.common import FitRes, Status, Code, ndarrays_to_parameters
 
 
 def _dataset(labels, names):
@@ -121,3 +124,34 @@ def test_training_and_evaluation_probes_are_persisted_separately(tmp_path):
         np.testing.assert_array_equal(h5["probe/clients/malicious_0/features"], [[9.]])
         assert h5["fit_probe"].attrs["split"] == "train"
         assert h5["probe"].attrs["split"] == "test"
+
+
+def test_fit_probe_preserves_original_truth_under_label_flipping(monkeypatch):
+    train = _dataset([0, 1], ["A", "B"])
+    train.y[:] = 0
+    client, _ = _client(monkeypatch, train, train, [[0.9, 0.1], [0.8, 0.2]])
+    payload = client._capture_probe_payload(
+        train, {"batch_size": 2, "probe_size": 2, "capture_logits": False,
+                "probe_original_labels": True}
+    )
+    np.testing.assert_array_equal(decode_array(payload["_eiffel_probe_labels"]), [0, 1])
+
+
+@pytest.mark.parametrize("source", ["test", None])
+def test_targeted_strategy_rejects_test_or_unidentified_attack_probe(source):
+    weights = [np.array([0., 0.], dtype=np.float32)]
+    strategy = InstrumentedFedAvg(
+        initial_parameters=ndarrays_to_parameters(weights),
+        storage={"enabled": False},
+        model_attack={"mechanism": "targeted_family_poisoning", "target_family": "B"},
+        num_rounds=1,
+    )
+    metrics = {"_cid": "malicious_0", "_eiffel_malicious": True}
+    if source is not None:
+        metrics["_eiffel_probe_source"] = source
+    results = [(SimpleNamespace(cid="malicious_0"), FitRes(
+        status=Status(code=Code.OK, message=""),
+        parameters=ndarrays_to_parameters(weights), num_examples=2, metrics=metrics,
+    ))]
+    with pytest.raises(RuntimeError, match="local training probe"):
+        strategy.aggregate_fit(1, results, [])

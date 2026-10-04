@@ -5,7 +5,7 @@ import json
 
 import numpy as np
 
-from eiffel.analysis.compare_metrics import RunSpec, analyse
+from eiffel.analysis.compare_metrics import RunSpec, analyse, read_per_family
 from eiffel.storage.round_store import RoundStore
 
 
@@ -131,6 +131,18 @@ def test_analysis_writes_round_final_delta_and_family_outputs(tmp_path):
     )
     assert np.isclose(round_one_delta, -0.20)
     assert np.isclose(round_two_delta, -0.20)
+
+
+def test_per_class_analysis_keeps_benign_recall(tmp_path):
+    path = tmp_path / "round_state.h5"
+    with RoundStore(path) as store:
+        store.save_client_metrics(
+            1, "benign_0", {"Benign": {"recall": 0.5, "f1": 0.6},
+                              "Attack": {"recall": 0.9}}, phase="evaluate"
+        )
+    rows = read_per_family(RunSpec("clean", path), phase="evaluate")
+    assert any(row["family"] == "Benign" and row["metric"] == "recall"
+               and row["value"] == 0.5 for row in rows)
 
 
 

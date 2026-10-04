@@ -43,7 +43,7 @@ class RoundStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._h5 = h5py.File(self.path, "a")
             self._h5.attrs["format"] = "eiffel-round-state"
-            self._h5.attrs["format_version"] = 2
+            self._h5.attrs["format_version"] = 3
 
     def close(self) -> None:
         if self._h5 is not None:
@@ -304,6 +304,7 @@ class RoundStore:
         )
         group = round_group.require_group(_safe(cid))
         group.attrs["cid"] = str(cid)
+        group.attrs["probe_split"] = probe_split
         group.attrs["malicious"] = np.uint8(bool(malicious))
         group.attrs["attack_active"] = np.uint8(bool(attack_active))
         group.attrs["mechanism"] = str(mechanism)

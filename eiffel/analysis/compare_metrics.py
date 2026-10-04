@@ -30,6 +30,7 @@ DEFAULT_METRICS = (
     "accuracy",
     "f1",
     "macro_f1",
+    "macro_f1_all_model_classes",
     "weighted_f1",
     "recall",
     "missrate",
@@ -38,6 +39,7 @@ DEFAULT_METRICS = (
     "min_class_recall",
     "macro_attack_recall",
     "min_attack_recall",
+    "test_class_coverage",
 )
 
 
@@ -292,7 +294,7 @@ def _read_json_per_family(run: RunSpec, phase: str) -> list[dict[str, object]]:
                 continue
             family, metric = key.rsplit(".", 1)
             if (
-                family in {"global", "Benign", "fit"}
+                family in {"global", "fit"}
                 or metric not in {"precision", "recall", "f1", "missrate"}
             ):
                 continue
@@ -429,7 +431,7 @@ def read_per_family(run: RunSpec, phase: str = "auto") -> list[dict[str, object]
                             continue
                         family, metric = key.rsplit(".", 1)
                         if (
-                            family in {"global", "Benign", "fit"}
+                            family in {"global", "fit"}
                             or metric
                             not in {"precision", "recall", "f1", "missrate"}
                         ):

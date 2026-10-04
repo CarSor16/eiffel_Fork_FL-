@@ -27,9 +27,13 @@ matrix, observed-class macro/minimum recall, and class coverage, while preservin
 family detection recall and benign false positive rate. A binary model predicts
 Attack, not a particular attack family: family precision is not inferred from it.
 
+The per-class comparison pipeline now retains Benign precision/recall/F1;
+previously it discarded that class when extracting per-family metrics.
+
 ## HDF5 and campaign checkpoints
 
-`/fit_probe` contains local training probe inputs, original labels when present,
+HDF5 format version 3 separates the probe sources. `/fit_probe` contains local
+training probe inputs, original labels when present,
 and class metadata. `/probe` retains held-out evaluation probes. Client fit
 probabilities are aligned with `/fit_probe/clients/<cid>`; global evaluation
 inference is aligned with `/probe/clients/<cid>`. Legacy clients without source
