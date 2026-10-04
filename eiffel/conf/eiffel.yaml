@@ -22,6 +22,7 @@
 # Optional parameters.
 num_attackers: 0
 num_clients: 10
+malicious_client_ids: []
 num_rounds: 10
 num_epochs: 10
 batch_size: 512
@@ -36,6 +37,7 @@ attacks:
 pools:
   - n_benign: ${num_clients}
     n_malicious: ${num_attackers}
+    malicious_client_ids: ${malicious_client_ids}
 
 # Runtime configuration.
 experiment:
