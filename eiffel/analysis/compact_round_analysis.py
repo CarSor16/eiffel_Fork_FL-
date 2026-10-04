@@ -30,6 +30,8 @@ from eiffel.analysis.compare_metrics import RunSpec, discover_runs
 PERFORMANCE_METRICS = (
     "accuracy",
     "macro_f1",
+    "macro_class_recall",
+    "min_class_recall",
     "macro_attack_recall",
     "min_attack_recall",
 )
