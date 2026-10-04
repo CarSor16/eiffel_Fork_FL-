@@ -32,6 +32,9 @@ jobs:
           python -m pip install --upgrade "pip<25"
           python -m pip install -c constraints-py310.txt -e . "pytest>=7.3,<8"
 
+      - name: Prepare test evidence directory
+        run: python -c "from pathlib import Path; Path('ci-evidence').mkdir(parents=True, exist_ok=True)"
+
       - name: Synthetic client and Flower smoke tests
         run: >
           python -m pytest -q -s
