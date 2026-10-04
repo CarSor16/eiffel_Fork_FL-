@@ -380,10 +380,20 @@ def _target_true_confidence(
             "must have the same number of samples."
         )
 
-    mask = np.asarray(
-        [value.lower() == target_family.lower() for value in family_array],
-        dtype=bool,
-    )
+    target_text = target_family.strip()
+    if target_text.lower().startswith("class_id:"):
+        try:
+            target_id = int(target_text.split(":", 1)[1].strip())
+        except ValueError as exc:
+            raise ValueError(
+                "target_family class_id selector must use class_id:<integer>."
+            ) from exc
+        mask = labels == target_id
+    else:
+        mask = np.asarray(
+            [value.lower() == target_text.lower() for value in family_array],
+            dtype=bool,
+        )
     if not bool(mask.any()):
         return None
 
