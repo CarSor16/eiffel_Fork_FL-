@@ -62,6 +62,7 @@ jobs:
           eiffel/core/tests/resource_allocation_test.py
           eiffel/core/tests/pool_client_selection_test.py
           eiffel/core/tests/campaign_runner_test.py
+          eiffel/core/tests/client_heterogeneity_test.py
           eiffel/datasets/tests/dataset_test.py
           eiffel/datasets/tests/nfv2_test.py
           eiffel/datasets/tests/mirage_test.py
@@ -661,6 +662,13 @@ jobs:
       - name: Build calibrated non-IID CESNET fixture
         run: python scripts/create_cesnet_calibrated_ci_fixture.py
 
+      - name: Quantify calibrated client heterogeneity
+        run: >
+          python -m eiffel.analysis.client_heterogeneity
+          data/cesnet/class_distribution.csv
+          --output-dir analysis-results/cesnet-calibrated/heterogeneity
+          --target-class 0
+          --malicious-ids 0,1
       - name: Run 30-round clean baseline
         run: >
           python -m eiffel.campaign_runner
@@ -722,6 +730,7 @@ jobs:
             outputs/cesnet-calibrated/clean/campaign_manifest.csv
             analysis-results/cesnet-calibrated/clean/**
             data/cesnet/manifest.json
+            analysis-results/cesnet-calibrated/heterogeneity/**
             data/cesnet/class_distribution.csv
           if-no-files-found: warn
           retention-days: 14
