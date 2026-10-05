@@ -231,6 +231,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install summary dependencies
+        run: |
+          python -m pip install --upgrade "pip<25"
+          python -m pip install -c constraints-py310.txt "numpy==1.23.5" "pandas<2.1"
+
       - uses: actions/download-artifact@v4
         with:
           pattern: cesnet-fixture-full-*
