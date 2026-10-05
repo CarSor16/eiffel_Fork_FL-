@@ -95,14 +95,14 @@ jobs:
           python -m eiffel.campaign_runner
           experiments/toml/cesnet_top50_clean.toml
           --output-root outputs/cesnet-fixture/clean
-          --set experiment.rounds=5
+          --set experiment.rounds=30
 
       - name: Run CESNET fixture Sign Flip
         run: >
           python -m eiffel.campaign_runner
           experiments/toml/cesnet_top50_sign_flip.toml
           --output-root outputs/cesnet-fixture/sign-flip
-          --set experiment.rounds=5
+          --set experiment.rounds=30
 
       - name: Validate persisted HDF5 runs
         shell: bash
@@ -134,7 +134,7 @@ jobs:
       - name: Upload CESNET fixture results
         uses: actions/upload-artifact@v4
         with:
-          name: cesnet-fixture-results
+          name: cesnet-fixture-30round-results
           path: |
             outputs/cesnet-fixture/**/round_state.h5
             outputs/cesnet-fixture/**/campaign_manifest.csv
