@@ -415,3 +415,227 @@ jobs:
               )
           print("All 13 CESNET fixture attacks completed successfully.")
           PY
+
+  cesnet-noniid-full-run:
+    if: contains(github.event.head_commit.message, '[cesnet-noniid]')
+    strategy:
+      fail-fast: false
+      matrix:
+        attack:
+          - clean
+          - label_flip_targeted
+          - sign_flip
+          - model_scaling
+          - gaussian_noise
+          - lie
+          - gradient_mimicry
+          - colluding_sign_flip
+          - min_max
+          - min_sum
+          - adaptive_stealth
+          - heterogeneity_aware_mimicry
+          - targeted_family_poisoning
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade "pip<25"
+          python -m pip install -c constraints-py310.txt -e .
+
+      - name: Build hard non-IID CESNET-shaped fixture
+        run: python scripts/create_cesnet_noniid_ci_fixture.py
+
+      - name: Run 30-round attack
+        shell: bash
+        run: |
+          mkdir -p "outputs/cesnet-noniid/${{ matrix.attack }}"
+          set +e
+          python -m eiffel.campaign_runner \
+            "experiments/toml/cesnet_top50_${{ matrix.attack }}.toml" \
+            --output-root "outputs/cesnet-noniid/${{ matrix.attack }}" \
+            --set experiment.rounds=30
+          rc=$?
+          set -e
+          echo "attack,return_code" > "outputs/cesnet-noniid/${{ matrix.attack }}/status.csv"
+          echo "${{ matrix.attack }},$rc" >> "outputs/cesnet-noniid/${{ matrix.attack }}/status.csv"
+          exit "$rc"
+
+      - name: Validate HDF5
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          path="$(find "outputs/cesnet-noniid/${{ matrix.attack }}" -name round_state.h5 -type f | head -n 1)"
+          test -n "$path"
+          python -m eiffel.analysis.validate_round_state "$path"
+
+      - name: Analyze attack run
+        if: success()
+        run: >
+          python -m eiffel.analysis.compare_metrics
+          --runs-root "outputs/cesnet-noniid/${{ matrix.attack }}"
+          --output-dir "analysis-results/cesnet-noniid/${{ matrix.attack }}"
+
+      - name: Upload attack summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cesnet-noniid-${{ matrix.attack }}
+          path: |
+            outputs/cesnet-noniid/${{ matrix.attack }}/status.csv
+            outputs/cesnet-noniid/${{ matrix.attack }}/campaign_manifest.csv
+            analysis-results/cesnet-noniid/${{ matrix.attack }}/round_metrics.csv
+            analysis-results/cesnet-noniid/${{ matrix.attack }}/final_metrics.csv
+            analysis-results/cesnet-noniid/${{ matrix.attack }}/per_family_metrics.csv
+            data/cesnet/manifest.json
+            data/cesnet/class_distribution.csv
+          if-no-files-found: warn
+          retention-days: 14
+
+  cesnet-noniid-summary:
+    if: always() && contains(github.event.head_commit.message, '[cesnet-noniid]')
+    needs: cesnet-noniid-full-run
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cesnet-noniid-*
+          path: collected
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install summary dependencies
+        run: python -m pip install "numpy==1.23.5" "pandas<2.1"
+
+      - name: Aggregate non-IID attack results
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import numpy as np
+          import pandas as pd
+
+          root = Path("collected")
+          out = Path("cesnet-noniid-summary")
+          out.mkdir(parents=True, exist_ok=True)
+
+          status_paths = list(root.rglob("status.csv"))
+          statuses = pd.concat(
+              [pd.read_csv(path) for path in status_paths],
+              ignore_index=True,
+          ).sort_values("attack")
+          statuses.to_csv(out / "suite_status.csv", index=False)
+
+          final_paths = list(root.rglob("final_metrics.csv"))
+          finals = pd.concat(
+              [pd.read_csv(path) for path in final_paths],
+              ignore_index=True,
+          ) if final_paths else pd.DataFrame()
+          if not finals.empty:
+              finals = finals.sort_values("attack")
+              finals.to_csv(out / "final_metrics.csv", index=False)
+
+          family_paths = list(root.rglob("per_family_metrics.csv"))
+          if family_paths:
+              families = pd.concat(
+                  [pd.read_csv(path) for path in family_paths],
+                  ignore_index=True,
+              )
+              recalls = families[families["metric"] == "recall"].copy()
+              idx = recalls.groupby(["attack", "family"])["round"].idxmax()
+              final_recall = recalls.loc[
+                  idx, ["attack", "family", "value"]
+              ].copy()
+              final_recall.to_csv(out / "final_class_recall.csv", index=False)
+
+              clean = final_recall[final_recall["attack"] == "clean"][
+                  ["family", "value"]
+              ].rename(columns={"value": "clean_recall"})
+              attacked = final_recall[
+                  final_recall["attack"] != "clean"
+              ].merge(clean, on="family", how="left")
+              attacked["recall_delta_vs_clean"] = (
+                  attacked["value"] - attacked["clean_recall"]
+              )
+              attacked.to_csv(
+                  out / "class_recall_delta_vs_clean.csv", index=False
+              )
+
+              target = final_recall[
+                  final_recall["family"] == "domain_00.example"
+              ].sort_values("attack")
+              target.to_csv(out / "target_class_recall.csv", index=False)
+
+          if not finals.empty:
+              clean_rows = finals[finals["attack"] == "clean"]
+              delta_rows = []
+              if not clean_rows.empty:
+                  clean_row = clean_rows.iloc[0]
+                  metric_cols = [
+                      col for col in finals.columns
+                      if col not in {"attack", "run", "round"}
+                  ]
+                  for _, row in finals[finals["attack"] != "clean"].iterrows():
+                      for metric in metric_cols:
+                          try:
+                              a = float(row[metric]); b = float(clean_row[metric])
+                          except (TypeError, ValueError):
+                              continue
+                          if np.isfinite(a) and np.isfinite(b):
+                              delta_rows.append({
+                                  "attack": row["attack"],
+                                  "metric": metric,
+                                  "delta_vs_clean": a - b,
+                              })
+              pd.DataFrame(delta_rows).to_csv(
+                  out / "delta_vs_clean.csv", index=False
+              )
+
+          print("=== suite status ===")
+          print(statuses.to_string(index=False))
+          if not finals.empty:
+              cols = [
+                  x for x in [
+                      "attack", "round", "accuracy", "macro_f1", "mcc",
+                      "macro_class_recall", "min_class_recall"
+                  ] if x in finals.columns
+              ]
+              print("\n=== final metrics ===")
+              print(finals[cols].to_string(index=False))
+          PY
+
+      - name: Upload aggregated non-IID results
+        uses: actions/upload-artifact@v4
+        with:
+          name: cesnet-noniid-summary
+          path: cesnet-noniid-summary/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Assert all attacks completed
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          status = pd.read_csv("cesnet-noniid-summary/suite_status.csv")
+          expected = 13
+          failed = status[status["return_code"] != 0]
+          if len(status) != expected or not failed.empty:
+              raise SystemExit(
+                  f"expected={expected} observed={len(status)} "
+                  f"failed={failed.to_dict('records')}"
+              )
+          print("All 13 hard non-IID CESNET fixture attacks completed.")
+          PY
