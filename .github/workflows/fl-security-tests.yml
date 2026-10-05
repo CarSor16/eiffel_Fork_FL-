@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   focused-tests:
+    if: "!contains(github.event.head_commit.message, '[cesnet-full]')"
     strategy:
       fail-fast: false
       matrix:
@@ -143,10 +144,28 @@ jobs:
           retention-days: 14
 
 
-  cesnet-fixture-full-suite:
+
+  cesnet-fixture-full-run:
     if: contains(github.event.head_commit.message, '[cesnet-full]')
+    strategy:
+      fail-fast: false
+      matrix:
+        attack:
+          - clean
+          - label_flip_targeted
+          - sign_flip
+          - model_scaling
+          - gaussian_noise
+          - lie
+          - gradient_mimicry
+          - colluding_sign_flip
+          - min_max
+          - min_sum
+          - adaptive_stealth
+          - heterogeneity_aware_mimicry
+          - targeted_family_poisoning
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4
@@ -156,97 +175,231 @@ jobs:
           python-version: "3.10"
           cache: "pip"
 
-      - name: Install package and test dependencies
+      - name: Install package
         run: |
           python -m pip install --upgrade "pip<25"
-          python -m pip install -c constraints-py310.txt -e . "pytest>=7.3,<8"
+          python -m pip install -c constraints-py310.txt -e .
 
       - name: Build deterministic CESNET-shaped fixture
         run: python scripts/create_cesnet_ci_fixture.py
 
-      - name: Run full CESNET fixture attack suite
+      - name: Run 30-round attack
         shell: bash
         run: |
-          set -uo pipefail
-          mkdir -p outputs/cesnet-fixture-full
-          echo "profile,return_code" > outputs/cesnet-fixture-full/suite_status.csv
-          profiles=(
-            clean
-            label_flip_targeted
-            sign_flip
-            model_scaling
-            gaussian_noise
-            lie
-            gradient_mimicry
-            colluding_sign_flip
-            min_max
-            min_sum
-            adaptive_stealth
-            heterogeneity_aware_mimicry
-            targeted_family_poisoning
-          )
-          for suffix in "${profiles[@]}"; do
-            echo "===== CESNET fixture: ${suffix} ====="
-            set +e
-            python -m eiffel.campaign_runner               "experiments/toml/cesnet_top50_${suffix}.toml"               --output-root "outputs/cesnet-fixture-full/${suffix}"               --set experiment.rounds=30
-            rc=$?
-            set -e
-            echo "${suffix},${rc}" >> outputs/cesnet-fixture-full/suite_status.csv
-          done
+          mkdir -p "outputs/cesnet-fixture-full/${{ matrix.attack }}"
+          set +e
+          python -m eiffel.campaign_runner             "experiments/toml/cesnet_top50_${{ matrix.attack }}.toml"             --output-root "outputs/cesnet-fixture-full/${{ matrix.attack }}"             --set experiment.rounds=30
+          rc=$?
+          set -e
+          echo "attack,return_code" > "outputs/cesnet-fixture-full/${{ matrix.attack }}/status.csv"
+          echo "${{ matrix.attack }},$rc" >> "outputs/cesnet-fixture-full/${{ matrix.attack }}/status.csv"
+          exit "$rc"
 
-      - name: Validate all completed HDF5 runs
+      - name: Validate HDF5
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
-          found=0
-          while IFS= read -r path; do
-            found=1
-            echo "Validating $path"
-            python -m eiffel.analysis.validate_round_state "$path"
-          done < <(find outputs/cesnet-fixture-full -name round_state.h5 -type f | sort)
-          test "$found" -eq 1
+          path="$(find "outputs/cesnet-fixture-full/${{ matrix.attack }}" -name round_state.h5 -type f | head -n 1)"
+          test -n "$path"
+          python -m eiffel.analysis.validate_round_state "$path"
 
-      - name: Analyze full CESNET fixture suite
+      - name: Analyze attack run
+        if: success()
         run: >
           python -m eiffel.analysis.compare_metrics
-          --runs-root outputs/cesnet-fixture-full
-          --output-dir analysis-results/cesnet-fixture-full
+          --runs-root "outputs/cesnet-fixture-full/${{ matrix.attack }}"
+          --output-dir "analysis-results/cesnet-fixture-full/${{ matrix.attack }}"
 
-      - name: Print suite summary
-        shell: bash
-        run: |
-          echo "=== suite_status.csv ==="
-          cat outputs/cesnet-fixture-full/suite_status.csv
-          echo
-          echo "=== final_metrics.csv ==="
-          cat analysis-results/cesnet-fixture-full/final_metrics.csv
-          echo
-          echo "=== delta_vs_clean.csv ==="
-          cat analysis-results/cesnet-fixture-full/delta_vs_clean.csv || true
-
-      - name: Upload full CESNET fixture analysis
+      - name: Upload attack summary
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cesnet-fixture-full-suite-results
+          name: cesnet-fixture-full-${{ matrix.attack }}
           path: |
-            outputs/cesnet-fixture-full/suite_status.csv
-            outputs/cesnet-fixture-full/**/campaign_manifest.csv
-            analysis-results/cesnet-fixture-full/**
+            outputs/cesnet-fixture-full/${{ matrix.attack }}/status.csv
+            outputs/cesnet-fixture-full/${{ matrix.attack }}/campaign_manifest.csv
+            analysis-results/cesnet-fixture-full/${{ matrix.attack }}/round_metrics.csv
+            analysis-results/cesnet-fixture-full/${{ matrix.attack }}/final_metrics.csv
+            analysis-results/cesnet-fixture-full/${{ matrix.attack }}/per_family_metrics.csv
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Assert every CESNET fixture profile completed
+  cesnet-fixture-full-summary:
+    if: always() && contains(github.event.head_commit.message, '[cesnet-full]')
+    needs: cesnet-fixture-full-run
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cesnet-fixture-full-*
+          path: collected
+
+      - name: Aggregate attack results
         shell: bash
         run: |
           python - <<'PY'
-          import csv
+          from pathlib import Path
+          import pandas as pd
+          import numpy as np
+
+          root = Path("collected")
+          out = Path("cesnet-fixture-full-summary")
+          out.mkdir(parents=True, exist_ok=True)
+
+          status_paths = list(root.rglob("status.csv"))
+          statuses = pd.concat(
+              [pd.read_csv(path) for path in status_paths],
+              ignore_index=True,
+          ) if status_paths else pd.DataFrame(columns=["attack", "return_code"])
+          statuses = statuses.sort_values("attack")
+          statuses.to_csv(out / "suite_status.csv", index=False)
+
+          final_paths = list(root.rglob("final_metrics.csv"))
+          finals = pd.concat(
+              [pd.read_csv(path) for path in final_paths],
+              ignore_index=True,
+          ) if final_paths else pd.DataFrame()
+          if not finals.empty:
+              finals = finals.sort_values("attack")
+              finals.to_csv(out / "final_metrics.csv", index=False)
+
+              clean_rows = finals[finals["attack"] == "clean"]
+              delta_rows = []
+              if not clean_rows.empty:
+                  metric_cols = [
+                      col for col in finals.columns
+                      if col not in {"attack", "run", "round"}
+                  ]
+                  for attack in sorted(set(finals["attack"]) - {"clean"}):
+                      attack_row = finals[finals["attack"] == attack].iloc[0]
+                      clean_row = clean_rows.iloc[0]
+                      for metric in metric_cols:
+                          try:
+                              a = float(attack_row[metric])
+                              b = float(clean_row[metric])
+                          except (TypeError, ValueError):
+                              continue
+                          if np.isfinite(a) and np.isfinite(b):
+                              delta_rows.append({
+                                  "attack": attack,
+                                  "metric": metric,
+                                  "delta_vs_clean": a - b,
+                              })
+              pd.DataFrame(delta_rows).to_csv(
+                  out / "delta_vs_clean.csv", index=False
+              )
+
+          family_paths = list(root.rglob("per_family_metrics.csv"))
+          if family_paths:
+              families = pd.concat(
+                  [pd.read_csv(path) for path in family_paths],
+                  ignore_index=True,
+              )
+              families.to_csv(out / "per_family_metrics.csv", index=False)
+              recalls = families[families["metric"] == "recall"].copy()
+              if not recalls.empty:
+                  idx = recalls.groupby(
+                      ["attack", "run", "family"]
+                  )["round"].idxmax()
+                  final_recall = recalls.loc[
+                      idx, ["attack", "family", "value"]
+                  ].copy()
+                  final_recall.to_csv(
+                      out / "final_class_recall.csv", index=False
+                  )
+                  summary = (
+                      final_recall.groupby("attack")["value"]
+                      .agg(
+                          mean_class_recall="mean",
+                          min_class_recall="min",
+                          max_class_recall="max",
+                          zero_recall_classes=lambda s: int((s <= 1e-12).sum()),
+                      )
+                      .reset_index()
+                      .sort_values("attack")
+                  )
+                  summary.to_csv(
+                      out / "class_recall_summary.csv", index=False
+                  )
+
+                  clean = final_recall[
+                      final_recall["attack"] == "clean"
+                  ][["family", "value"]].rename(
+                      columns={"value": "clean_recall"}
+                  )
+                  attacked = final_recall[
+                      final_recall["attack"] != "clean"
+                  ].merge(clean, on="family", how="left")
+                  attacked["recall_delta_vs_clean"] = (
+                      attacked["value"] - attacked["clean_recall"]
+                  )
+                  attacked.sort_values(
+                      ["attack", "recall_delta_vs_clean"]
+                  ).to_csv(
+                      out / "class_recall_delta_vs_clean.csv",
+                      index=False,
+                  )
+
+          round_paths = list(root.rglob("round_metrics.csv"))
+          if round_paths:
+              rounds = pd.concat(
+                  [pd.read_csv(path) for path in round_paths],
+                  ignore_index=True,
+              )
+              rounds.sort_values(["attack", "round"]).to_csv(
+                  out / "round_metrics.csv", index=False
+              )
+
+          print("=== suite_status.csv ===")
+          print(statuses.to_string(index=False))
+          if not finals.empty:
+              cols = [
+                  col for col in
+                  ["attack", "round", "accuracy", "macro_f1", "mcc",
+                   "macro_class_recall", "min_class_recall"]
+                  if col in finals.columns
+              ]
+              print("\n=== final metrics ===")
+              print(finals[cols].to_string(index=False))
+          recall_summary = out / "class_recall_summary.csv"
+          if recall_summary.exists():
+              print("\n=== class recall summary ===")
+              print(pd.read_csv(recall_summary).to_string(index=False))
+          PY
+
+      - name: Upload aggregated CESNET fixture results
+        uses: actions/upload-artifact@v4
+        with:
+          name: cesnet-fixture-full-summary
+          path: cesnet-fixture-full-summary/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Assert all 13 attacks completed
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pandas as pd
           from pathlib import Path
 
-          path = Path("outputs/cesnet-fixture-full/suite_status.csv")
-          rows = list(csv.DictReader(path.open()))
-          failed = [row for row in rows if int(row["return_code"]) != 0]
-          if failed:
-              raise SystemExit("Failed CESNET fixture profiles: " + str(failed))
-          print(f"All {len(rows)} CESNET fixture profiles completed successfully.")
+          expected = {
+              "clean", "label_flip_targeted", "sign_flip", "model_scaling",
+              "gaussian_noise", "lie", "gradient_mimicry",
+              "colluding_sign_flip", "min_max", "min_sum",
+              "adaptive_stealth", "heterogeneity_aware_mimicry",
+              "targeted_family_poisoning",
+          }
+          status = pd.read_csv(
+              Path("cesnet-fixture-full-summary") / "suite_status.csv"
+          )
+          observed = set(status["attack"])
+          missing = expected - observed
+          failed = status[status["return_code"] != 0]
+          if missing or not failed.empty:
+              raise SystemExit(
+                  f"missing={sorted(missing)} failed={failed.to_dict('records')}"
+              )
+          print("All 13 CESNET fixture attacks completed successfully.")
           PY
