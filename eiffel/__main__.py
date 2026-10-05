@@ -51,6 +51,15 @@ def main(cfg: DictConfig):
         logger.handlers.clear()
         logger.propagate = True
 
+    # Eiffel emits its own compact run/round summaries. Third-party INFO output from
+    # Flower and Ray is extremely verbose (including the full History object) and
+    # duplicates metrics already persisted to JSON/HDF5.
+    flwr_logger.setLevel(logging.WARNING)
+    logging.getLogger("flwr").setLevel(logging.WARNING)
+    logging.getLogger("ray").setLevel(logging.WARNING)
+    logging.getLogger("tensorflow").setLevel(logging.ERROR)
+    tf.get_logger().setLevel(logging.ERROR)
+
     enable_tf_gpu_growth()
 
     log.info("Starting Eiffel")
@@ -101,7 +110,7 @@ if __name__ == "__main__":
         )
         sys.argv = cmd.split(" ")
 
-    flwr_logger.setLevel(logging.INFO)
+    flwr_logger.setLevel(logging.WARNING)
     try:
         main()
     except Exception as e:

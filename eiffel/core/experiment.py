@@ -80,6 +80,8 @@ class Experiment:
         strategy: partial[Strategy] | Strategy | None = None,
         server: Server | None = None,
         partitioner: Partitioner | DictConfig | None = None,
+        storage: dict | DictConfig | None = None,
+        max_concurrent_clients: int | None = None,
     ):
         """Initialize the experiment.
 
@@ -202,11 +204,34 @@ class Experiment:
             self.pools.append(pool)
 
         self.n_clients = sum([len(p) for p in self.pools])
+        if max_concurrent_clients is None:
+            self.n_concurrent = self.n_clients
+        else:
+            if int(max_concurrent_clients) < 1:
+                raise ConfigError("max_concurrent_clients must be >= 1")
+            self.n_concurrent = min(self.n_clients, int(max_concurrent_clients))
 
         if strategy is None:
             strategy = FedAvg()
 
         if isinstance(strategy, partial):
+            strategy_name = getattr(strategy.func, "__name__", "")
+            capture_inference = (
+                strategy_name == "InstrumentedFedAvg"
+                and storage is not None
+                and bool(storage.get("enabled", True))
+                and bool(storage.get("capture_inference", True))
+            )
+            probe_config = {
+                "capture_inference": capture_inference,
+                "capture_logits": bool(storage.get("capture_logits", True))
+                if storage is not None else True,
+                "capture_probe_features": bool(
+                    storage.get("capture_probe_features", True)
+                ) if storage is not None else True,
+                "probe_size": int(storage.get("probe_size", 256))
+                if storage is not None else 256,
+            }
             self.strategy = strategy(
                 min_fit_clients=self.n_clients,
                 min_evaluate_clients=self.n_clients,
@@ -214,11 +239,13 @@ class Experiment:
                 on_fit_config_fn=mk_config_fn({
                     "batch_size": batch_size,
                     "num_epochs": num_epochs,
+                    **probe_config,
                 }),
                 evaluate_metrics_aggregation_fn=aggregate_metrics_fn,
                 fit_metrics_aggregation_fn=aggregate_metrics_fn,
                 on_evaluate_config_fn=mk_config_fn(
-                    {"batch_size": batch_size}, stats_when=self.n_rounds
+                    {"batch_size": batch_size, **probe_config},
+                    stats_when=self.n_rounds,
                 ),
                 initial_parameters=get_random_weights(model_fn, datasets[0].X.shape[1]),
             )
@@ -239,6 +266,7 @@ class Experiment:
             (ray_kwargs or {})
             | {
                 "ignore_reinit_error": True,
+                "include_dashboard": False,
                 "num_gpus": len(tf.config.list_physical_devices("GPU")),
             }
             # | {"local_mode": True}  # in debugger
@@ -247,31 +275,50 @@ class Experiment:
         )
 
         ray.init(**init_kwargs)
-
-        for pool in self.pools:
-            pool.deploy()
-
-        mappings = reduce(lambda a, b: a | b, [p.gen_mappings() for p in self.pools])
-
-        fn = functools.partial(
-            mk_client,
-            mappings=mappings,
-            seed=self.seed,
+        logger.info(
+            "Ray client concurrency: at most %s/%s clients at once.",
+            self.n_concurrent,
+            self.n_clients,
         )
 
-        self.hist = start_simulation(
-            client_fn=fn,
-            num_clients=self.n_clients,
-            config=ServerConfig(num_rounds=self.n_rounds),
-            strategy=self.strategy,
-            client_resources=compute_client_resources(self.n_clients),
-            actor_kwargs={"on_actor_init_fn": mk_client_init_fn(seed=self.seed)},
-            clients_ids=reduce(lambda a, b: a + b, [p.ids for p in self.pools]),
-            server=self.server,
-            keep_initialised=True,
-        )
+        try:
+            for pool in self.pools:
+                pool.deploy()
 
-        ray.shutdown()
+            mappings = reduce(lambda a, b: a | b, [p.gen_mappings() for p in self.pools])
+
+            fn = functools.partial(
+                mk_client,
+                mappings=mappings,
+                seed=self.seed,
+            )
+
+            self.hist = start_simulation(
+                client_fn=fn,
+                num_clients=self.n_clients,
+                config=ServerConfig(num_rounds=self.n_rounds),
+                strategy=self.strategy,
+                client_resources=compute_client_resources(self.n_concurrent),
+                actor_kwargs={"on_actor_init_fn": mk_client_init_fn(seed=self.seed)},
+                clients_ids=reduce(lambda a, b: a + b, [p.ids for p in self.pools]),
+                server=self.server,
+                keep_initialised=True,
+            )
+
+            if not self.hist.metrics_distributed_fit:
+                raise RuntimeError(
+                    "Flower completed without any distributed fit metrics. "
+                    "This indicates that no client fit result reached aggregation; "
+                    "inspect the client failure printed above."
+                )
+        finally:
+            store = getattr(self.strategy, "store", None)
+            if store is not None:
+                try:
+                    store.close()
+                except Exception:
+                    logger.exception("Failed to close round-state storage cleanly.")
+            ray.shutdown()
 
     @property
     def results(self) -> Results:
@@ -344,8 +391,18 @@ def compute_client_resources(
             f" of available CPUs ({available_cpus}). Some clients will be run"
             " sequentially."
         )
+    # Ray 2.6 requires CPU resource quantities greater than one to be whole
+    # numbers. Use ceil(total_cpus / requested_concurrency): this prevents Ray from
+    # scheduling more than the requested number of client actors without passing an
+    # invalid fractional quantity such as 2.7 CPUs.
+    total_cpus = max(1, int(psutil.cpu_count() or 1))
+    num_cpus = (
+        float(math.ceil(total_cpus / n_concurrent))
+        if n_concurrent <= total_cpus
+        else 1.0
+    )
     return {
-        "num_cpus": math.floor(max(1, available_cpus / n_concurrent)),
+        "num_cpus": num_cpus,
         "num_gpus": available_gpus / min(n_concurrent, available_cpus),
     }
 

@@ -1,0 +1,45 @@
+# Eiffel FL Security Lab TOML profile
+# Adapted from the previous flower_attack_lab configuration style.
+# Default dataset: sampled NF-V2 CSE-CIC-IDS2018 (binary NIDS).
+
+[experiment]
+name = "realistic-colluding-sign-flip"
+seed = 2026
+num_clients = 10
+rounds = 30
+
+[dataset]
+name = "cicids"
+
+[partition]
+type = "dirichlet"
+dirichlet_alpha = 0.5
+
+[model]
+name = "popoola"
+
+[training]
+local_epochs = 1
+learning_rate = 0.0001
+batch_size = 512
+
+[attack]
+mechanism = "colluding_sign_flip"
+objective = "untargeted"
+malicious_fraction = 0.2
+strength = 3.0
+
+[attack.schedule]
+type = "continuous"
+
+[aggregation]
+name = "fedavg"
+
+[storage]
+enabled = true
+path = "round_state.h5"
+compression = "gzip"
+compression_level = 4
+flush_each_round = true
+capture_inference = true
+probe_size = 256

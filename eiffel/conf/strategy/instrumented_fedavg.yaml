@@ -1,0 +1,6 @@
+_target_: eiffel.strategy.instrumented.InstrumentedFedAvg
+_partial_: true
+storage: ${storage}
+model_attack: ${model_attack}
+num_rounds: ${num_rounds}
+seed: ${seed}

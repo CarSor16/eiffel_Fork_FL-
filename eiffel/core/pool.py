@@ -52,6 +52,7 @@ class Pool:
         n_benign: int,
         *,
         n_malicious: int = 0,
+        malicious_client_ids: list[int] | None = None,
         attack: PoisonIns | dict | None = None,
         pool_id: str | None = None,
         test_ratio: float = 0.2,
@@ -86,21 +87,46 @@ class Pool:
             pool_id = "".join(random.choices(alphabet, k=6))
         self.pool_id = pool_id
 
-        benign_cids = [f"{pool_id}_benign_{i}" for i in range(n_benign)]
-        if n_malicious > 0 and attack is None:
-            raise ValueError(
-                "Invalid conditions for attack scenarios: "
-                f"`{n_malicious = }`, yet attack is `None`."
+        requested_malicious_ids = [
+            int(value) for value in (malicious_client_ids or [])
+        ]
+        if len(requested_malicious_ids) != len(set(requested_malicious_ids)):
+            raise ConfigError("malicious_client_ids must be unique.")
+        if requested_malicious_ids and len(requested_malicious_ids) != n_malicious:
+            raise ConfigError(
+                "len(malicious_client_ids) must match n_malicious: "
+                f"{len(requested_malicious_ids)} != {n_malicious}."
             )
-        elif n_malicious == 0 and attack is not None:
+        if n_malicious == 0 and attack is not None:
             logger.warning(
                 "Ignoring attack instructions: no malicious clients in the pool."
             )
-        malicious_cids = [f"{pool_id}_malicious_{i}" for i in range(n_malicious)]
+        self.malicious_ids: set[EiffelCID] = set()
 
         if not isinstance(dataset, Dataset):
             dataset = call(dataset)
-        _test, _train = dataset.split(at=test_ratio, seed=self.seed)
+
+        # Synthetic/replay datasets can provide an explicit train/test split in
+        # metadata. This preserves an exact federated training sample count and a
+        # separate common test distribution instead of randomly re-splitting them.
+        if "Split" in dataset.m.columns and set(dataset.m["Split"].unique()) >= {
+            "train",
+            "test",
+        }:
+            train_mask = dataset.m["Split"] == "train"
+            test_mask = dataset.m["Split"] == "test"
+
+            _train = dataset.copy()
+            _train.X = dataset.X.loc[train_mask].copy()
+            _train.y = dataset.y.loc[train_mask].copy()
+            _train.m = dataset.m.loc[train_mask].copy()
+
+            _test = dataset.copy()
+            _test.X = dataset.X.loc[test_mask].copy()
+            _test.y = dataset.y.loc[test_mask].copy()
+            _test.m = dataset.m.loc[test_mask].copy()
+        else:
+            _test, _train = dataset.split(at=test_ratio, seed=self.seed)
 
         if not partitioner:
             partitioner = DumbPartitioner
@@ -115,23 +141,92 @@ class Pool:
             partitioner.load(_test)
             _test_shards = partitioner.all()
 
-        self.shards = {}
-        for cid in benign_cids:
-            self.shards[cid] = (_train_shards.pop(), _test_shards.pop())
-
-        if attack:
-            assert isinstance(attack, PoisonIns)
-
-            p_task = self.attack.base
-            for cid in malicious_cids:
-                _train_shard = _train_shards.pop()
-                _train_shard.poison(
-                    p_task.fraction,
-                    p_task.operation,
-                    target_classes=self.attack.target,
-                    seed=self.seed,
+        # Attach a stable logical ID to every shard. For fixed preassigned
+        # datasets this is the original ClientHint; otherwise partition position is
+        # used. Explicit malicious IDs therefore refer to the real logical client
+        # created during preprocessing, not merely to "the first N attackers".
+        records: list[tuple[int, Dataset, Dataset]] = []
+        for partition_idx, (train_shard, test_shard) in enumerate(
+            zip(_train_shards, _test_shards)
+        ):
+            logical_id = partition_idx
+            if "ClientHint" in train_shard.m.columns:
+                hints = sorted(
+                    int(value)
+                    for value in train_shard.m["ClientHint"].unique()
+                    if int(value) >= 0
                 )
-                self.shards[cid] = (_train_shard, _test_shards.pop())
+                if len(hints) == 1:
+                    logical_id = hints[0]
+                elif requested_malicious_ids:
+                    raise ConfigError(
+                        "Explicit malicious_client_ids require each partition to "
+                        "contain exactly one non-negative ClientHint."
+                    )
+            records.append((logical_id, train_shard, test_shard))
+
+        logical_ids = [record[0] for record in records]
+        if len(logical_ids) != len(set(logical_ids)):
+            if requested_malicious_ids:
+                raise ConfigError(
+                    "Explicit malicious_client_ids require unique logical client "
+                    f"IDs, got {logical_ids}."
+                )
+            # Historical/non-preassigned partitioners can split a dataset whose
+            # ClientHint metadata no longer identifies one logical client per shard.
+            # In that case preserve backward compatibility by using partition order.
+            records = [
+                (partition_idx, train_shard, test_shard)
+                for partition_idx, (_, train_shard, test_shard)
+                in enumerate(records)
+            ]
+            logical_ids = [record[0] for record in records]
+
+        if requested_malicious_ids:
+            missing = sorted(set(requested_malicious_ids) - set(logical_ids))
+            if missing:
+                raise ConfigError(
+                    "Requested malicious client IDs are absent from the partition: "
+                    f"{missing}."
+                )
+            malicious_logical_ids = set(requested_malicious_ids)
+        else:
+            # Preserve historical Eiffel behaviour for fixed/preassigned datasets:
+            # after benign shards were popped from the end, the lowest logical
+            # partitions remained malicious.
+            malicious_logical_ids = set(logical_ids[:n_malicious])
+
+        if len(malicious_logical_ids) != n_malicious:
+            raise ConfigError(
+                "Resolved malicious client count does not match n_malicious."
+            )
+
+        if attack is not None:
+            assert isinstance(attack, PoisonIns)
+            p_task = attack.base
+        else:
+            p_task = None
+
+        self.shards = {}
+        for logical_id, train_shard, test_shard in records:
+            malicious = logical_id in malicious_logical_ids
+            role = "malicious" if malicious else "benign"
+            cid = f"{pool_id}_{role}_{logical_id}"
+            if malicious:
+                self.malicious_ids.add(cid)
+                # Model-poisoning clients need no data-poisoning instructions. If a
+                # PoisonIns is present, only apply its non-zero base poisoning here;
+                # scheduled tasks remain EiffelClient's responsibility.
+                if p_task is not None and p_task.fraction > 0.0:
+                    train_shard.poison(
+                        p_task.fraction,
+                        p_task.operation,
+                        target_classes=attack.target,
+                        source_class=attack.source_class,
+                        destination_class=attack.destination_class,
+                        seed=self.seed,
+                    )
+            self.shards[cid] = (train_shard, test_shard)
 
     def __len__(self) -> int:
         """Return the number of clients in the pool."""
@@ -156,14 +251,19 @@ class Pool:
         """Return whether the pool is deployed."""
         return len(self.holders) == len(self.shards)
 
-    def gen_mappings(self) -> dict[EiffelCID, tuple[ObjectRef, PoisonIns, keras.Model]]:
+    def gen_mappings(
+        self,
+    ) -> dict[
+        EiffelCID,
+        tuple[ObjectRef, PoisonIns | None, keras.Model, bool],
+    ]:
         """Generate mappings between CIDs, and their handle and poisoning instructions.
 
         Returns
         -------
-        dict[EiffelCID, tuple[ObjectRef, PoisonIns]]
-            The mappings. Keys are the client IDs, and values are tuples of each
-            client's dataset handle and poisoning instructions.
+        dict[EiffelCID, tuple[ObjectRef, PoisonIns | None, keras.Model, bool]]
+            The mappings. Each entry carries the dataset handle, optional data
+            poisoning instructions, model factory, and explicit malicious role.
         """
         if not self.deployed():
             raise RuntimeError(
@@ -172,10 +272,12 @@ class Pool:
 
         mappings = {}
         for cid, handle in self.holders.items():
+            is_malicious = cid in self.malicious_ids
             mappings[cid] = (
                 handle,
-                self.attack if "malicious" in cid else None,
+                self.attack if is_malicious else None,
                 self.model_fn,
+                is_malicious,
             )
         return mappings
 

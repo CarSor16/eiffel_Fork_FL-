@@ -1,0 +1,50 @@
+# CICIoT2023 binary NIDS experiment (30 rounds).
+
+[experiment]
+name = "ciciot-binary-min-sum"
+seed = 2026
+num_clients = 10
+rounds = 30
+
+[dataset]
+name = "ciciot_binary"
+task = "binary"
+
+[partition]
+type = "preassigned"
+
+[model]
+name = "popoola"
+
+[training]
+local_epochs = 1
+learning_rate = 0.0001
+batch_size = 512
+
+[attack]
+mechanism = "min_sum"
+malicious_fraction = 0.2
+
+[attack.min_sum]
+direction = "negative_mean"
+search_steps = 24
+max_lambda = 10.0
+constraint_margin = 1.0
+
+[attack.schedule]
+type = "continuous"
+
+[aggregation]
+name = "fedavg"
+
+[storage]
+enabled = true
+path = "round_state.h5"
+compression = "gzip"
+compression_level = 4
+flush_each_round = true
+capture_inference = true
+capture_logits = true
+capture_probe_features = true
+capture_global_inference = true
+probe_size = 512

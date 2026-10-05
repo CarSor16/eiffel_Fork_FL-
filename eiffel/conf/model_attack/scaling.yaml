@@ -1,0 +1,11 @@
+# @package model_attack
+enabled: true
+mechanism: scaling
+strength: 1.0
+scale_factor: 10.0
+noise_std: 1.0
+lie_z: 1.5
+mimicry_lambda: 0.85
+schedule:
+  type: continuous
+  start_round: 1

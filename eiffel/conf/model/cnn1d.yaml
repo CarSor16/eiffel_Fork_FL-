@@ -1,0 +1,4 @@
+_target_: eiffel.models.advanced.mk_cnn1d
+_partial_: true
+learning_rate: 0.001
+dropout: 0.2
