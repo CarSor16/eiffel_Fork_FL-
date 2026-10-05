@@ -141,3 +141,112 @@ jobs:
             analysis-results/cesnet-fixture/**
           if-no-files-found: error
           retention-days: 14
+
+
+  cesnet-fixture-full-suite:
+    if: contains(github.event.head_commit.message, '[cesnet-full]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade "pip<25"
+          python -m pip install -c constraints-py310.txt -e . "pytest>=7.3,<8"
+
+      - name: Build deterministic CESNET-shaped fixture
+        run: python scripts/create_cesnet_ci_fixture.py
+
+      - name: Run full CESNET fixture attack suite
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p outputs/cesnet-fixture-full
+          echo "profile,return_code" > outputs/cesnet-fixture-full/suite_status.csv
+          profiles=(
+            clean
+            label_flip_targeted
+            sign_flip
+            model_scaling
+            gaussian_noise
+            lie
+            gradient_mimicry
+            colluding_sign_flip
+            min_max
+            min_sum
+            adaptive_stealth
+            heterogeneity_aware_mimicry
+            targeted_family_poisoning
+          )
+          for suffix in "${profiles[@]}"; do
+            echo "===== CESNET fixture: ${suffix} ====="
+            set +e
+            python -m eiffel.campaign_runner               "experiments/toml/cesnet_top50_${suffix}.toml"               --output-root "outputs/cesnet-fixture-full/${suffix}"               --set experiment.rounds=30
+            rc=$?
+            set -e
+            echo "${suffix},${rc}" >> outputs/cesnet-fixture-full/suite_status.csv
+          done
+
+      - name: Validate all completed HDF5 runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r path; do
+            found=1
+            echo "Validating $path"
+            python -m eiffel.analysis.validate_round_state "$path"
+          done < <(find outputs/cesnet-fixture-full -name round_state.h5 -type f | sort)
+          test "$found" -eq 1
+
+      - name: Analyze full CESNET fixture suite
+        run: >
+          python -m eiffel.analysis.compare_metrics
+          --runs-root outputs/cesnet-fixture-full
+          --output-dir analysis-results/cesnet-fixture-full
+
+      - name: Print suite summary
+        shell: bash
+        run: |
+          echo "=== suite_status.csv ==="
+          cat outputs/cesnet-fixture-full/suite_status.csv
+          echo
+          echo "=== final_metrics.csv ==="
+          cat analysis-results/cesnet-fixture-full/final_metrics.csv
+          echo
+          echo "=== delta_vs_clean.csv ==="
+          cat analysis-results/cesnet-fixture-full/delta_vs_clean.csv || true
+
+      - name: Upload full CESNET fixture analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cesnet-fixture-full-suite-results
+          path: |
+            outputs/cesnet-fixture-full/suite_status.csv
+            outputs/cesnet-fixture-full/**/campaign_manifest.csv
+            analysis-results/cesnet-fixture-full/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Assert every CESNET fixture profile completed
+        shell: bash
+        run: |
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+
+          path = Path("outputs/cesnet-fixture-full/suite_status.csv")
+          rows = list(csv.DictReader(path.open()))
+          failed = [row for row in rows if int(row["return_code"]) != 0]
+          if failed:
+              raise SystemExit("Failed CESNET fixture profiles: " + str(failed))
+          print(f"All {len(rows)} CESNET fixture profiles completed successfully.")
+          PY
