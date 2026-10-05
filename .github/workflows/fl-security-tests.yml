@@ -639,3 +639,89 @@ jobs:
               )
           print("All 13 hard non-IID CESNET fixture attacks completed.")
           PY
+
+  cesnet-calibrated-clean:
+    if: contains(github.event.head_commit.message, '[cesnet-calibrate]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade "pip<25"
+          python -m pip install -c constraints-py310.txt -e .
+
+      - name: Build calibrated non-IID CESNET fixture
+        run: python scripts/create_cesnet_calibrated_ci_fixture.py
+
+      - name: Run 30-round clean baseline
+        run: >
+          python -m eiffel.campaign_runner
+          experiments/toml/cesnet_top50_clean.toml
+          --output-root outputs/cesnet-calibrated/clean
+          --set experiment.rounds=30
+
+      - name: Validate HDF5
+        shell: bash
+        run: |
+          set -euo pipefail
+          path="$(find outputs/cesnet-calibrated/clean -name round_state.h5 -type f | head -n 1)"
+          test -n "$path"
+          python -m eiffel.analysis.validate_round_state "$path"
+
+      - name: Analyze clean baseline
+        run: >
+          python -m eiffel.analysis.compare_metrics
+          --runs-root outputs/cesnet-calibrated/clean
+          --output-dir analysis-results/cesnet-calibrated/clean
+
+      - name: Assert baseline quality
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          root = Path("analysis-results/cesnet-calibrated/clean")
+          final = pd.read_csv(root / "final_metrics.csv").iloc[0]
+          families = pd.read_csv(root / "per_family_metrics.csv")
+          recalls = families[families["metric"] == "recall"]
+          final_round = recalls["round"].max()
+          recalls = recalls[recalls["round"] == final_round]
+          recall_map = dict(zip(recalls["family"], recalls["value"]))
+
+          checks = {
+              "accuracy>=0.80": float(final["accuracy"]) >= 0.80,
+              "macro_f1>=0.75": float(final["macro_f1"]) >= 0.75,
+              "min_class_recall>=0.40": float(final["min_class_recall"]) >= 0.40,
+              "target0_recall>=0.75": recall_map.get("domain_00.example", 0.0) >= 0.75,
+              "target1_recall>=0.50": recall_map.get("domain_01.example", 0.0) >= 0.50,
+          }
+          print("Final clean metrics:")
+          print(final.to_string())
+          print("\nLowest class recalls:")
+          print(recalls.sort_values("value").head(10).to_string(index=False))
+          print("\nChecks:", checks)
+          if not all(checks.values()):
+              raise SystemExit("Calibrated fixture clean baseline is not healthy enough.")
+          PY
+
+      - name: Upload calibrated clean result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cesnet-calibrated-clean
+          path: |
+            outputs/cesnet-calibrated/clean/campaign_manifest.csv
+            analysis-results/cesnet-calibrated/clean/**
+            data/cesnet/manifest.json
+            data/cesnet/class_distribution.csv
+          if-no-files-found: warn
+          retention-days: 14
