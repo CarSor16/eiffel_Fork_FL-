@@ -67,3 +67,77 @@ jobs:
           eiffel/datasets/tests/preprocessed_network_test.py
           eiffel/datasets/tests/partitioners_test.py
           eiffel/datasets/tests/poisoning_test.py
+
+
+  cesnet-fixture-smoke:
+    if: contains(github.event.head_commit.message, '[cesnet-fixture]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade "pip<25"
+          python -m pip install -c constraints-py310.txt -e . "pytest>=7.3,<8"
+
+      - name: Build deterministic CESNET-shaped fixture
+        run: python scripts/create_cesnet_ci_fixture.py
+
+      - name: Run CESNET fixture clean baseline
+        run: >
+          python -m eiffel.campaign_runner
+          experiments/toml/cesnet_top50_clean.toml
+          --output-root outputs/cesnet-fixture/clean
+          --set experiment.rounds=5
+
+      - name: Run CESNET fixture Sign Flip
+        run: >
+          python -m eiffel.campaign_runner
+          experiments/toml/cesnet_top50_sign_flip.toml
+          --output-root outputs/cesnet-fixture/sign-flip
+          --set experiment.rounds=5
+
+      - name: Validate persisted HDF5 runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r path; do
+            found=1
+            echo "Validating $path"
+            python -m eiffel.analysis.validate_round_state "$path"
+          done < <(find outputs/cesnet-fixture -name round_state.h5 -type f | sort)
+          test "$found" -eq 1
+
+      - name: Compare clean and Sign Flip
+        run: >
+          python -m eiffel.analysis.compare_metrics
+          --runs-root outputs/cesnet-fixture
+          --output-dir analysis-results/cesnet-fixture
+
+      - name: Print final metrics
+        shell: bash
+        run: |
+          echo "=== final_metrics.csv ==="
+          cat analysis-results/cesnet-fixture/final_metrics.csv
+          echo
+          echo "=== delta_vs_clean.csv ==="
+          cat analysis-results/cesnet-fixture/delta_vs_clean.csv || true
+
+      - name: Upload CESNET fixture results
+        uses: actions/upload-artifact@v4
+        with:
+          name: cesnet-fixture-results
+          path: |
+            outputs/cesnet-fixture/**/round_state.h5
+            outputs/cesnet-fixture/**/campaign_manifest.csv
+            analysis-results/cesnet-fixture/**
+          if-no-files-found: error
+          retention-days: 14
