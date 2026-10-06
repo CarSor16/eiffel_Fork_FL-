@@ -182,6 +182,7 @@ def test_model_family_runs_end_to_end_for_binary_and_multiclass(
     profile["dataset"]["stress_informative_features"] = 4
     profile["dataset"]["stress_redundant_features"] = 2
     profile["dataset"]["num_classes"] = 4 if task == "multiclass" else 2
+    profile["dataset"]["rare_class_id"] = 3 if task == "multiclass" else 1
     profile["model"] = model_config
     profile["training"]["batch_size"] = 16
     profile["attack"] = {
