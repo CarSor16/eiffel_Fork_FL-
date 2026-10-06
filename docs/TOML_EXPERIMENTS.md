@@ -94,6 +94,38 @@ malicious_fraction = 0.2
 
 becomes 8 benign clients and 2 malicious clients.
 
+
+## Pluggable aggregation
+
+Aggregation is selected independently from the attack, dataset and model:
+
+```toml
+[aggregation]
+name = "fedavg"
+```
+
+Supported server-side backends are:
+
+- `fedavg`: sample-count weighted Federated Averaging;
+- `median`: coordinate-wise median;
+- `trimmed_mean`: coordinate-wise symmetric trimmed mean;
+- `krum`: single-update Krum selection;
+- `multi_krum`: average of the lowest-scoring Krum candidates.
+
+Examples:
+
+```powershell
+.\run.cmd portable_model_attack dataset=cesnet aggregation=median
+.\run.cmd portable_model_attack dataset=cesnet aggregation=trimmed_mean aggregation.trim_ratio=0.2
+.\run.cmd portable_model_attack dataset=cesnet aggregation=krum
+.\run.cmd portable_model_attack dataset=cesnet aggregation=multi_krum aggregation.num_selected=4
+```
+
+For Krum and Multi-Krum, `aggregation.num_byzantine` defaults to the configured
+number of malicious clients. It can be overridden explicitly. The runtime rejects
+configurations that violate Krum's minimum client-count requirement. The selected
+aggregation backend is stored in each HDF5 round metadata entry for reproducibility.
+
 ## Synthetic 50k benchmark
 
 The previous attack lab's synthetic stress benchmark is available again through:
