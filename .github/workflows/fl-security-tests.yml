@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/fl-security-lab
+      - refactor/remove-hydra
   workflow_dispatch:
 
 concurrency:
@@ -56,8 +57,7 @@ jobs:
           eiffel/core/tests/round_store_test.py
           eiffel/core/tests/compare_metrics_test.py
           eiffel/core/tests/compact_round_analysis_test.py
-          eiffel/core/tests/plot_callback_test.py
-          eiffel/core/tests/toml_runner_test.py
+          eiffel/core/tests/direct_runner_test.py
           eiffel/core/tests/synthetic_stress_test.py
           eiffel/core/tests/resource_allocation_test.py
           eiffel/core/tests/pool_client_selection_test.py
