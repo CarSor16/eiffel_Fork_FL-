@@ -89,15 +89,15 @@ start_round = 6
 or
 
 ```bash
-model_attack=gradient_mimicry \
-model_attack.schedule.type=on_off \
-model_attack.schedule.period=4 \
-model_attack.schedule.active_rounds=2
+attack=gradient_mimicry \
+attack.schedule.type=on_off \
+attack.schedule.on_rounds=2 \
+attack.schedule.off_rounds=2
 ```
 
 ## Storage controls
 
-Defaults are in `eiffel/conf/storage/default.yaml`.
+Defaults are defined by the direct TOML runtime in `eiffel.direct_runner.STORAGE_DEFAULTS` and can be overridden from the `[storage]` table of any experiment profile.
 
 Examples:
 
