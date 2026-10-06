@@ -146,6 +146,47 @@ def test_krum_rejects_impossible_client_byzantine_configuration():
         resolve_profile(profile)
 
 
+
+@pytest.mark.parametrize(
+    ("name", "extra"),
+    [
+        ("none", {}),
+        ("norm_clipping", {"max_norm": 5.0}),
+        (
+            "probe_distillation",
+            {
+                "temperature": 2.0,
+                "learning_rate": 0.0005,
+                "alpha": 0.5,
+                "epochs": 1,
+            },
+        ),
+    ],
+)
+def test_defenses_resolve_from_same_profile(name, extra):
+    profile = _portable_profile("synthetic_stress")
+    profile["defense"] = {"name": name, **extra}
+    resolved = resolve_profile(profile)
+    assert resolved["defense"]["name"] == name
+    for key, value in extra.items():
+        assert resolved["defense"][key] == value
+
+
+def test_defense_shorthand_switches_without_profile_edit():
+    base = _portable_profile("synthetic_stress")
+    switched = apply_overrides(base, ["defense=norm_clipping", "defense.max_norm=3.0"])
+    resolved = resolve_profile(switched)
+    assert resolved["defense"] == {"name": "norm_clipping", "max_norm": 3.0}
+
+
+def test_probe_distillation_requires_probe_feature_capture():
+    profile = _portable_profile("synthetic_stress")
+    profile["defense"] = {"name": "probe_distillation"}
+    profile["storage"]["capture_probe_features"] = False
+    with pytest.raises(ExperimentConfigError, match="capture_probe_features"):
+        resolve_profile(profile)
+
+
 def test_sign_flip_resolves_to_plain_runtime_config():
     resolved = resolve_profile({
         "experiment": {"seed": 2026, "num_clients": 10, "rounds": 20},
