@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
 import h5py
 import pytest
-from omegaconf import OmegaConf
-
-from eiffel.toml_runner import build_command
+from eiffel.direct_runner import build_command
 
 
 RAY_STARTUP_TIMEOUT_MARKERS = (
@@ -284,7 +283,7 @@ capture_inference = false
     "mechanism",
     ["min_max", "targeted_family_poisoning"],
 )
-def test_advanced_attack_runs_through_toml_hydra_flower_and_hdf5(
+def test_advanced_attack_runs_through_direct_toml_flower_and_hdf5(
     tmp_path: Path,
     mechanism: str,
 ):
@@ -292,24 +291,19 @@ def test_advanced_attack_runs_through_toml_hydra_flower_and_hdf5(
     run_dir = tmp_path / f"run-{mechanism}"
     profile.write_text(_profile_text(mechanism), encoding="utf-8")
 
-    command = build_command(
-        profile,
-        extra=[
-            f"hydra.run.dir={run_dir.as_posix()}",
-            "hydra.output_subdir=.hydra",
-        ],
-    )
+    command = build_command(profile, output_dir=run_dir)
     completed = _run_eiffel_with_ray_startup_retry(
         command,
         cwd=Path(__file__).resolve().parents[3],
     )
     assert completed.returncode == 0, completed.stdout
 
-    hydra_config = run_dir / ".hydra" / "config.yaml"
-    assert hydra_config.exists(), completed.stdout
-    cfg = OmegaConf.load(hydra_config)
-    assert int(cfg.pools[0].n_benign) == 3, OmegaConf.to_yaml(cfg.pools)
-    assert int(cfg.pools[0].n_malicious) == 1, OmegaConf.to_yaml(cfg.pools)
+    resolved = json.loads(
+        (run_dir / "resolved_profile.json").read_text(encoding="utf-8")
+    )
+    assert resolved["experiment"]["num_benign"] == 3
+    assert resolved["experiment"]["num_attackers"] == 1
+    assert resolved["attack"]["mechanism"] == mechanism
 
     h5_path = run_dir / "round_state.h5"
     assert h5_path.exists(), completed.stdout
@@ -355,13 +349,7 @@ def test_label_flip_schedule_is_persisted_end_to_end(tmp_path: Path):
     run_dir = tmp_path / "run-label-flip"
     profile.write_text(_label_flip_profile_text(), encoding="utf-8")
 
-    command = build_command(
-        profile,
-        extra=[
-            f"hydra.run.dir={run_dir.as_posix()}",
-            "hydra.output_subdir=.hydra",
-        ],
-    )
+    command = build_command(profile, output_dir=run_dir)
     completed = _run_eiffel_with_ray_startup_retry(
         command,
         cwd=Path(__file__).resolve().parents[3],
@@ -424,13 +412,7 @@ def test_targeted_label_flip_without_local_target_is_not_marked_active(
         encoding="utf-8",
     )
 
-    command = build_command(
-        profile,
-        extra=[
-            f"hydra.run.dir={run_dir.as_posix()}",
-            "hydra.output_subdir=.hydra",
-        ],
-    )
+    command = build_command(profile, output_dir=run_dir)
     completed = _run_eiffel_with_ray_startup_retry(
         command,
         cwd=Path(__file__).resolve().parents[3],
