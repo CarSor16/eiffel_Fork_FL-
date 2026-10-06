@@ -18,16 +18,13 @@ from flwr.server import Server, ServerConfig
 from flwr.server.strategy import FedAvg, Strategy
 from flwr.simulation import start_simulation
 from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
-from hydra.utils import instantiate
 from keras.models import Model
-from omegaconf import DictConfig, ListConfig
 
 from eiffel.core.errors import ConfigError
 from eiffel.datasets.dataset import Dataset
 from eiffel.datasets.partitioners import DumbPartitioner, Partitioner
 from eiffel.datasets.poisoning import PoisonIns
 from eiffel.utils import set_seed
-from eiffel.utils.hydra import instantiate_or_return
 from eiffel.utils.time import timeit
 from eiffel.utils.typing import ConfigDict, MetricsDict
 
@@ -36,6 +33,22 @@ from .pool import Pool
 from .results import Results
 
 logger = logging.getLogger(__name__)
+
+# Hydra/OmegaConf configuration objects are no longer accepted by the public
+# runtime. These aliases keep old type annotations harmless during migration.
+DictConfig = dict
+ListConfig = list
+
+def instantiate_or_return(obj, typ):
+    if isinstance(obj, typ):
+        return obj
+    raise TypeError(
+        "Hydra configuration objects are no longer supported; pass concrete "
+        f"Python objects instead (got {type(obj)})."
+    )
+
+def instantiate(*args, **kwargs):
+    raise TypeError("Hydra _target_ configurations are no longer supported.")
 
 
 class Experiment:
