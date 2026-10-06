@@ -1,9 +1,8 @@
 """Batch campaign runner for reproducible Eiffel experiment sweeps.
 
-The runner mutates user-facing TOML profiles in memory, translates every variant
-through the same TOML->Hydra compatibility layer used by run.cmd, and executes each
-variant sequentially. Flower/Ray still uses the maximum safe client concurrency
-available unless --max-concurrent-clients is explicitly supplied.
+The runner mutates user-facing TOML profiles in memory and executes every variant
+through the same direct TOML runtime used by run.cmd. Each variant is isolated in
+its own subprocess and output directory.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-from eiffel.toml_runner import load_profile, profile_to_overrides
+from eiffel.direct_runner import build_command, load_profile
 
 
 def _parse_scalar(value: str) -> Any:
@@ -146,14 +145,17 @@ def _command(
     output_dir: Path,
     max_concurrent_clients: int | None,
 ) -> list[str]:
-    overrides = profile_to_overrides(profile)
-    extras = [f"hydra.run.dir={output_dir.as_posix()}"]
-    if max_concurrent_clients is not None:
-        extras.append(
-            "++experiment.max_concurrent_clients="
-            f"{int(max_concurrent_clients)}"
-        )
-    return [sys.executable, "-m", "eiffel", *overrides, *extras]
+    output_dir.mkdir(parents=True, exist_ok=True)
+    profile_path = output_dir / "campaign_profile.json"
+    profile_path.write_text(
+        json.dumps(profile, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return build_command(
+        profile_path,
+        output_dir=output_dir,
+        max_concurrent_clients=max_concurrent_clients,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
