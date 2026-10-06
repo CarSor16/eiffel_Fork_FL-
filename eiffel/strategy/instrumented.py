@@ -416,12 +416,14 @@ class InstrumentedStrategy(FedAvg):
             attack_mechanism=mechanism,
             attack_multiplier=round_attack_multiplier,
             malicious_clients=malicious_clients,
+            aggregation_name=str(self.aggregation_cfg.get("name", "fedavg")),
         )
         self._round_log_state[int(server_round)] = {
             "mechanism": mechanism,
             "attack_multiplier": float(round_attack_multiplier),
             "malicious_clients": malicious_clients,
             "fit_clients": len(results),
+            "aggregation": str(self.aggregation_cfg.get("name", "fedavg")),
         }
 
         aggregated_update = aggregate_updates(
