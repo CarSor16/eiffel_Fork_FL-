@@ -183,6 +183,13 @@ function Show-AttackHelp {
     Write-Host ""
     Write-Host "TOML is the single configuration backend. Optional overrides use"
     Write-Host "dotted.path=value, for example: experiment.rounds=5 attack.strength=2.0"
+    Write-Host ""
+    Write-Host "Dataset-portable profile"
+    Write-Host "  Use portable_model_attack without rewriting task/model/partition per dataset:"
+    Write-Host "    .\run.cmd portable_model_attack dataset=cesnet"
+    Write-Host "    .\run.cmd portable_model_attack dataset=ciciot_family attack=gaussian_noise"
+    Write-Host "  The runtime infers dataset task, class count, partitioner and default model."
+    Write-Host "  Explicit TOML/CLI values always override inferred defaults."
 }
 
 $Profiles = Get-Profiles
@@ -330,14 +337,15 @@ try {
             "eiffel\core\tests\round_store_test.py",
             "eiffel\core\tests\compare_metrics_test.py",
             "eiffel\core\tests\compact_round_analysis_test.py",
-            "eiffel\core\tests\plot_callback_test.py",
-            "eiffel\core\tests\toml_runner_test.py",
+            "eiffel\core\tests\direct_runner_test.py",
             "eiffel\core\tests\synthetic_stress_test.py",
             "eiffel\core\tests\synthetic_client_integration_test.py",
             "eiffel\core\tests\resource_allocation_test.py",
             "eiffel\core\tests\pool_client_selection_test.py",
             "eiffel\core\tests\campaign_runner_test.py",
             "eiffel\core\tests\advanced_attacks_integration_test.py",
+            "eiffel\core\tests\current_profiles_integration_test.py",
+            "eiffel\core\tests\client_heterogeneity_test.py",
             "eiffel\datasets\tests\dataset_test.py",
             "eiffel\datasets\tests\nfv2_test.py",
             "eiffel\datasets\tests\mirage_test.py",
