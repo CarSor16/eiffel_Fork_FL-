@@ -21,6 +21,7 @@ from flwr.server.strategy import FedAvg
 from eiffel.analysis.update_audit import audit_updates
 from eiffel.attacks.model import apply_round_attack
 from eiffel.storage import RoundStore, decode_array
+from eiffel.strategy.aggregation import aggregate_updates, canonical_aggregation_name
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +52,20 @@ def _failure_summary(failures: list[Any], limit: int = 5) -> str:
     return "; ".join(items) + suffix
 
 
-class InstrumentedFedAvg(FedAvg):
-    """FedAvg that preserves raw round state and supports procedural model attacks."""
+class InstrumentedStrategy(FedAvg):
+    """Instrumented Flower strategy with a pluggable aggregation backend.
+
+    FedAvg remains the Flower control-plane base class for client sampling and
+    evaluation, while aggregate_fit delegates submitted model deltas to Eiffel's
+    selected aggregation backend.
+    """
 
     def __init__(
         self,
         *args,
         storage: Mapping[str, Any] | None = None,
         model_attack: Mapping[str, Any] | None = None,
+        aggregation: Mapping[str, Any] | None = None,
         num_rounds: int | None = None,
         seed: int = 0,
         **kwargs,
@@ -68,6 +75,10 @@ class InstrumentedFedAvg(FedAvg):
 
         self.storage_cfg = _plain(storage or {})
         self.attack_cfg = _plain(model_attack or {})
+        self.aggregation_cfg = _plain(aggregation or {"name": "fedavg"})
+        self.aggregation_cfg["name"] = canonical_aggregation_name(
+            str(self.aggregation_cfg.get("name", "fedavg"))
+        )
         self.num_rounds = num_rounds
         self.seed = int(seed)
         self._round_log_state: dict[int, dict[str, Any]] = {}
@@ -349,13 +360,6 @@ class InstrumentedFedAvg(FedAvg):
             else float(data_round_fraction)
         )
 
-        for idx, fit_res in enumerate(fit_results):
-            submitted_weights = [
-                global_ + delta
-                for global_, delta in zip(self._global_weights, submitted_updates[idx])
-            ]
-            fit_res.parameters = ndarrays_to_parameters(submitted_weights)
-
         audits = audit_updates(submitted_updates)
 
         for idx, client in enumerate(clients):
@@ -420,13 +424,26 @@ class InstrumentedFedAvg(FedAvg):
             "fit_clients": len(results),
         }
 
-        aggregated, metrics = super().aggregate_fit(server_round, results, failures)
-        if aggregated is not None:
-            self._global_weights = [
-                np.asarray(x, dtype=np.float32)
-                for x in parameters_to_ndarrays(aggregated)
-            ]
-            self.store.save_global(int(server_round), self._global_weights)
+        aggregated_update = aggregate_updates(
+            submitted_updates,
+            num_examples=[fit_res.num_examples for fit_res in fit_results],
+            config=self.aggregation_cfg,
+        )
+        self._global_weights = [
+            np.asarray(global_ + delta, dtype=np.float32)
+            for global_, delta in zip(self._global_weights, aggregated_update)
+        ]
+        aggregated = ndarrays_to_parameters(self._global_weights)
+        self.store.save_global(int(server_round), self._global_weights)
+
+        metrics = {}
+        if self.fit_metrics_aggregation_fn:
+            metrics = self.fit_metrics_aggregation_fn(
+                [
+                    (fit_res.num_examples, fit_res.metrics)
+                    for fit_res in fit_results
+                ]
+            )
 
         return aggregated, metrics
 
@@ -561,3 +578,7 @@ class InstrumentedFedAvg(FedAvg):
         # evaluation (including persisted global inference) have succeeded.
         self.store.mark_round_complete(int(server_round))
         return aggregated
+
+
+# Backward-compatible name used by older tests/imports.
+InstrumentedFedAvg = InstrumentedStrategy
