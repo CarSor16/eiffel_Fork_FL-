@@ -178,6 +178,9 @@ def test_model_family_runs_end_to_end_for_binary_and_multiclass(
     profile["dataset"]["samples_per_client"] = 32
     profile["dataset"]["central_test_size"] = 64
     profile["dataset"]["num_features"] = 8
+    profile["dataset"]["stress_latent_dim"] = 4
+    profile["dataset"]["stress_informative_features"] = 4
+    profile["dataset"]["stress_redundant_features"] = 2
     profile["dataset"]["num_classes"] = 4 if task == "multiclass" else 2
     profile["model"] = model_config
     profile["training"]["batch_size"] = 16
@@ -247,6 +250,9 @@ def test_defense_runs_end_to_end(
     profile["dataset"]["samples_per_client"] = 32
     profile["dataset"]["central_test_size"] = 64
     profile["dataset"]["num_features"] = 8
+    profile["dataset"]["stress_latent_dim"] = 4
+    profile["dataset"]["stress_informative_features"] = 4
+    profile["dataset"]["stress_redundant_features"] = 2
     profile["model"] = {
         "name": "stress_mlp",
         "hidden1": 8,
