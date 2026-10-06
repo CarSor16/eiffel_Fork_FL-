@@ -53,7 +53,6 @@ from typing import ClassVar, List, Optional
 
 import numpy as np
 import pandas as pd
-from omegaconf import ListConfig
 from sklearn.preprocessing import MinMaxScaler
 
 from eiffel.datasets import DEFAULT_SEARCH_PATH, Dataset
@@ -130,7 +129,7 @@ class NFV2Dataset(Dataset):
         d = self.copy()
 
         assert target_classes is None or (
-            isinstance(target_classes, List | ListConfig)
+            isinstance(target_classes, list)
             and all(isinstance(c, str) for c in target_classes)
         ), "Invalid value for `target_classes`. Must be a list of strings or None."
 
