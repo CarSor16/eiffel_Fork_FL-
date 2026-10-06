@@ -6,8 +6,6 @@ from typing import Callable, Optional
 
 import keras
 import tensorflow as tf
-from hydra.utils import call
-from omegaconf import DictConfig
 from ray import ObjectRef
 from ray.actor import ActorHandle
 
@@ -47,7 +45,7 @@ class Pool:
     @timeit
     def __init__(
         self,
-        dataset: Dataset | DictConfig,
+        dataset: Dataset,
         model_fn: Callable[..., tf.keras.Model],
         n_benign: int,
         *,
@@ -104,7 +102,10 @@ class Pool:
         self.malicious_ids: set[EiffelCID] = set()
 
         if not isinstance(dataset, Dataset):
-            dataset = call(dataset)
+            raise TypeError(
+                "Pool now requires a concrete Dataset object; Hydra call configs "
+                f"are no longer supported (got {type(dataset)})."
+            )
 
         # Synthetic/replay datasets can provide an explicit train/test split in
         # metadata. This preserves an exact federated training sample count and a
