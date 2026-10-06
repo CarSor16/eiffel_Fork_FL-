@@ -341,7 +341,7 @@ If Python prints an error while processing `protobuf-3.19.6-...-nspkg.pth`, pull
 Recovery:
 
 ```powershell
-git pull origin feature/fl-security-lab
+git pull origin refactor/remove-hydra
 .\setup.cmd -Force
 .\run.cmd -Doctor
 ```
@@ -355,7 +355,7 @@ setuptools==80.9.0
 Pull the latest branch and rebuild the environment:
 
 ```powershell
-git pull origin feature/fl-security-lab
+git pull origin refactor/remove-hydra
 .\setup.cmd -Force
 ```
 
@@ -366,7 +366,7 @@ If installation fails with a Ray / PyArrow conflict, make sure you are on the la
 If installation fails with `ResolutionImpossible` and mentions Flower / cryptography / protobuf, first pull the latest branch and rebuild the virtual environment:
 
 ```powershell
-git pull origin feature/fl-security-lab
+git pull origin refactor/remove-hydra
 .\setup.cmd -Force
 ```
 
@@ -867,6 +867,21 @@ To try another model without editing the TOML:
 ```
 
 For thesis runs, prefer saving the model choice directly in a dedicated TOML profile.
+
+For model-poisoning experiments, the branch also provides a dataset-portable profile.
+The runtime infers the task, class count, partitioner and compatible default model from
+the selected dataset:
+
+```powershell
+.\run.cmd portable_model_attack dataset=cesnet
+.\run.cmd portable_model_attack dataset=ciciot_family attack=gaussian_noise
+.\run.cmd portable_model_attack dataset=mirage_app3 attack=min_max
+```
+
+This avoids maintaining one copy of the same model-poisoning TOML for every dataset.
+Explicit TOML or CLI overrides still take precedence when an experiment needs a
+non-default model, task or partition. Dataset-semantic attacks still require a valid
+dataset-specific target where scientifically necessary.
 
 ---
 
