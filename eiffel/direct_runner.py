@@ -60,6 +60,62 @@ DATASETS = {
     "ciciot2023_fine": "ciciot/fine",
 }
 
+DATASET_PRESETS = {
+    # Defaults describe the dataset structure, not a specific experiment. Users can
+    # still override any value explicitly in TOML or from the CLI.
+    "nfv2/sampled/cicids": {
+        "task": "binary", "num_classes": 2, "partition": "iid", "model": "popoola",
+    },
+    "nfv2/full/cicids": {
+        "task": "binary", "num_classes": 2, "partition": "iid", "model": "popoola",
+    },
+    "nfv2/datacenter/cicids": {
+        "task": "family_aware", "num_classes": 2, "partition": "dirichlet",
+        "model": "popoola",
+    },
+    "nfv2/sampled/nb15": {
+        "task": "binary", "num_classes": 2, "partition": "iid", "model": "popoola",
+    },
+    "nfv2/full/nb15": {
+        "task": "binary", "num_classes": 2, "partition": "iid", "model": "popoola",
+    },
+    "nfv2/datacenter/nb15": {
+        "task": "family_aware", "num_classes": 2, "partition": "dirichlet",
+        "model": "popoola",
+    },
+    "nfv2/sampled/toniot": {
+        "task": "binary", "num_classes": 2, "partition": "iid", "model": "popoola",
+    },
+    "nfv2/sampled/botiot": {
+        "task": "binary", "num_classes": 2, "partition": "iid", "model": "popoola",
+    },
+    "synthetic/stress": {
+        "task": "binary", "num_classes": 6, "partition": "dirichlet",
+        "model": "stress_mlp",
+    },
+    "mirage/app3": {
+        "task": "multiclass", "num_classes": 3, "partition": "preassigned",
+        "model": "p4p_mlp",
+    },
+    "cesnet/quicext25_top50": {
+        "task": "multiclass", "num_classes": 50, "partition": "preassigned",
+        "model": "p4p_mlp",
+    },
+    "ciciot/binary": {
+        "task": "binary", "num_classes": 2, "partition": "preassigned",
+        "model": "popoola",
+    },
+    "ciciot/family": {
+        "task": "multiclass", "num_classes": 8, "partition": "preassigned",
+        "model": "p4p_mlp",
+    },
+    "ciciot/fine": {
+        "task": "multiclass", "num_classes": 34, "partition": "preassigned",
+        "model": "p4p_mlp",
+    },
+}
+
+
 MODELS = {
     "mlp": "popoola",
     "popoola": "popoola",
@@ -310,13 +366,11 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
         raise ExperimentConfigError(
             f"Unsupported dataset {dataset_name!r}; add it to the dataset registry."
         )
+    preset = DATASET_PRESETS.get(registry, {})
     synthetic = registry == "synthetic/stress"
-    fixed = registry in {
-        "mirage/app3", "cesnet/quicext25_top50",
-        "ciciot/binary", "ciciot/family", "ciciot/fine",
-    }
+    fixed = str(preset.get("partition", "")) == "preassigned"
 
-    task = str(dataset.get("task", "binary")).lower()
+    task = str(dataset.get("task", preset.get("task", "binary"))).lower()
     if task == "multiclass_aware":
         task = "family_aware"
     if task not in {"binary", "family_aware", "multiclass"}:
@@ -336,7 +390,9 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
         raise ExperimentConfigError("malicious_client_ids are outside client range.")
     benign = total - attackers
 
-    model_name = MODELS.get(str(model.get("name", "popoola")).lower())
+    model_name = MODELS.get(
+        str(model.get("name", preset.get("model", "popoola"))).lower()
+    )
     if model_name is None:
         raise ExperimentConfigError("Unsupported model.")
     model_cfg: dict[str, Any] = {"name": model_name}
@@ -361,9 +417,14 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     if "adam_beta2" in training:
         model_cfg["beta2"] = float(training["adam_beta2"])
     model_cfg["task"] = "multiclass" if task == "multiclass" else "binary"
-    model_cfg["num_classes"] = int(dataset.get("num_classes", 6 if task == "multiclass" else 2))
+    model_cfg["num_classes"] = int(
+        dataset.get(
+            "num_classes",
+            preset.get("num_classes", 6 if task == "multiclass" else 2),
+        )
+    )
 
-    ptype = str(partition.get("type", "iid")).lower()
+    ptype = str(partition.get("type", preset.get("partition", "iid"))).lower()
     if fixed and ptype != "preassigned":
         raise ExperimentConfigError("Fixed preprocessed datasets require preassigned partitioning.")
     if synthetic:
@@ -462,6 +523,7 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     dataset_cfg = copy.deepcopy(dataset)
     dataset_cfg["registry"] = registry
     dataset_cfg["task"] = task
+    dataset_cfg["num_classes"] = int(model_cfg["num_classes"])
     if synthetic:
         dataset_cfg.update(
             num_clients=total,
