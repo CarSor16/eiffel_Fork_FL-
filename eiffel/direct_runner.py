@@ -18,6 +18,8 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Mapping
 
+import numpy as np
+
 from eiffel.strategy.aggregation import canonical_aggregation_name
 from eiffel.strategy.defense import canonical_defense_name
 
@@ -483,6 +485,9 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
                 )
             aggregation_cfg["num_selected"] = selected
 
+    storage_cfg = dict(STORAGE_DEFAULTS)
+    storage_cfg.update(storage)
+
     defense_name = canonical_defense_name(str(defense.get("name", "none")))
     defense_cfg: dict[str, Any] = {"name": defense_name}
     if defense_name == "norm_clipping":
@@ -526,8 +531,6 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
             epochs=epochs,
         )
 
-    storage_cfg = dict(STORAGE_DEFAULTS)
-    storage_cfg.update(storage)
     schedule = _schedule(attack, rounds)
     mechanism = str(attack.get("mechanism", "none")).lower()
     params = dict(attack)
