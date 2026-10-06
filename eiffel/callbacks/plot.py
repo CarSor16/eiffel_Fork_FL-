@@ -1,4 +1,4 @@
-"""Plotting Hydra callbacks for Eiffel."""
+"""Optional post-run plotting helpers for Eiffel."""
 
 import json
 import os
@@ -8,30 +8,23 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
-from hydra.core.utils import JobReturn
-from hydra.experimental.callback import Callback
-from omegaconf import DictConfig
 from scipy.interpolate import BSpline, make_interp_spline
 
 
-class PlotterCallback(Callback):
+class PlotterCallback:
     """Plot callback.
 
-    This class implements Hydra's callback mechanism to plot the FL runs.
-
-    For reference, see: https://hydra.cc/docs/experimental/callbacks/.
+    Retained as a plain plotting utility after removal of Hydra callbacks.
     """
 
     def __init__(self, output: str, input: str = "fit.json") -> None:
         self.input = input
         self.output = output
 
-    def on_job_end(
-        self, config: DictConfig, job_return: JobReturn, **kwargs: Any
-    ) -> None:
-        """Call when a job ends."""
+    def render(self) -> None:
+        """Render the configured JSON metrics file if it exists."""
         try:
-            f = Path(self.input).read_text()
+            f = Path(self.input).read_text(encoding="utf-8")
             metrics = json.loads(f)
             self._plot(metrics, output=self.output)
         except FileNotFoundError:
