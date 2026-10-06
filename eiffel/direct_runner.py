@@ -304,8 +304,7 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     if total < 1 or rounds < 1:
         raise ExperimentConfigError("num_clients and rounds must be >= 1.")
 
-    dataset_name = str(dataset.get("registry") or dataset.get("hydra_group")
-                       or dataset.get("name", "cicids")).lower()
+    dataset_name = str(dataset.get("registry") or dataset.get("name", "cicids")).lower()
     registry = DATASETS.get(dataset_name, dataset_name)
     if registry not in set(DATASETS.values()):
         raise ExperimentConfigError(
@@ -461,7 +460,6 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
                 raise ExperimentConfigError("targeted_family_poisoning requires probe_size > 0.")
 
     dataset_cfg = copy.deepcopy(dataset)
-    dataset_cfg.pop("hydra_group", None)
     dataset_cfg["registry"] = registry
     dataset_cfg["task"] = task
     if synthetic:
