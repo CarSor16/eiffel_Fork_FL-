@@ -285,6 +285,7 @@ class RoundStore:
         *,
         submitted_update: NDArraySeq,
         pre_attack_update: NDArraySeq | None = None,
+        post_defense_update: NDArraySeq | None = None,
         audit: Mapping[str, float] | None = None,
         probabilities: np.ndarray | None = None,
         logits: np.ndarray | None = None,
@@ -320,6 +321,10 @@ class RoundStore:
         if pre_attack_update is not None:
             self._write_layers(
                 group, "pre_attack_update", pre_attack_update, dtype="float32"
+            )
+        if post_defense_update is not None:
+            self._write_layers(
+                group, "post_defense_update", post_defense_update, dtype="float32"
             )
 
         if audit:
