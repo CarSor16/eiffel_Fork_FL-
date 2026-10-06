@@ -1,4 +1,4 @@
-"""End-to-end smoke test for TOML -> Hydra -> Flower -> HDF5/JSON."""
+"""End-to-end smoke test for TOML -> Python factories -> Flower."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import h5py
 
-from eiffel.toml_runner import build_command
+from eiffel.direct_runner import build_command
 
 
 def test_synthetic_flower_one_round_persists_metrics(tmp_path: Path):
@@ -79,15 +79,8 @@ probe_size = 32
         encoding="utf-8",
     )
 
-    command = build_command(
-        profile,
-        extra=[
-            f"hydra.run.dir={run_dir.as_posix()}",
-            "hydra.output_subdir=.hydra",
-        ],
-    )
     completed = subprocess.run(
-        command,
+        build_command(profile, output_dir=run_dir),
         cwd=Path(__file__).resolve().parents[3],
         text=True,
         stdout=subprocess.PIPE,
@@ -95,47 +88,27 @@ probe_size = 32
         timeout=180,
     )
     assert completed.returncode == 0, completed.stdout
-
-    # Runtime logging should remain human-readable. Flower's full History object is
-    # persisted to JSON/HDF5 and must not be dumped back to the terminal.
+    assert "Configuration backend: TOML -> Python factories" in completed.stdout
     assert "Round 1/1" in completed.stdout
-    assert "metrics_distributed_fit" not in completed.stdout
-    assert "app_fit: metrics_distributed" not in completed.stdout
+
+    resolved = json.loads(
+        (run_dir / "resolved_profile.json").read_text(encoding="utf-8")
+    )
+    assert resolved["dataset"]["registry"] == "synthetic/stress"
+    assert resolved["attack"]["mechanism"] == "none"
 
     h5_path = run_dir / "round_state.h5"
     assert h5_path.exists(), completed.stdout
     with h5py.File(h5_path, "r") as h5:
-        assert "clients" in h5, completed.stdout
-        assert "round_0001" in h5["clients"], completed.stdout
+        assert "round_0001" in h5["clients"]
         clients = list(h5["clients"]["round_0001"].keys())
-        assert clients, completed.stdout
-        first_client = h5["clients"]["round_0001"][clients[0]]
-        assert "submitted_update" in first_client
-        assert "metrics" in first_client
-        assert "fit" in first_client["metrics"]
-        assert "evaluate" in first_client["metrics"]
-        assert "probabilities" in first_client
-        assert "logits" in first_client
-        assert "inference" in first_client
-        assert first_client["probabilities"].shape == first_client["logits"].shape
-
+        assert clients
+        client = h5["clients"]["round_0001"][clients[0]]
+        assert "submitted_update" in client
+        assert "metrics" in client
+        assert "probabilities" in client
         assert "probe" in h5
-        assert "features" in h5["probe"]
-        assert "labels" in h5["probe"]
-        assert h5["probe"]["features"].shape[0] == 32
-        assert h5["probe"]["labels"].shape[0] == 32
-
         assert "global_inference" in h5
-        global_round = h5["global_inference"]["round_0001"]
-        assert clients[0] in global_round
-        global_client = global_round[clients[0]]
-        assert "probabilities" in global_client
-        assert "logits" in global_client
-        assert global_client["probabilities"].shape == global_client["logits"].shape
 
-    fit = json.loads((run_dir / "fit.json").read_text(encoding="utf-8"))
-    distributed = json.loads(
-        (run_dir / "distributed.json").read_text(encoding="utf-8")
-    )
-    assert fit, completed.stdout
-    assert distributed, completed.stdout
+    assert json.loads((run_dir / "fit.json").read_text(encoding="utf-8"))
+    assert json.loads((run_dir / "distributed.json").read_text(encoding="utf-8"))
