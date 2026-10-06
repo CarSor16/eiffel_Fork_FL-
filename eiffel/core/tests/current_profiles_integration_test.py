@@ -65,6 +65,70 @@ def _expected_attackers(profile: dict) -> int:
     )
 
 
+
+
+@pytest.mark.parametrize(
+    ("aggregation_name", "aggregation_config"),
+    [
+        ("fedavg", {"name": "fedavg"}),
+        ("median", {"name": "median"}),
+        ("trimmed_mean", {"name": "trimmed_mean", "trim_ratio": 0.2}),
+        ("krum", {"name": "krum", "num_byzantine": 1}),
+        (
+            "multi_krum",
+            {"name": "multi_krum", "num_byzantine": 1, "num_selected": 2},
+        ),
+    ],
+)
+def test_aggregation_backend_runs_end_to_end(
+    tmp_path: Path,
+    aggregation_name: str,
+    aggregation_config: dict,
+):
+    source = PROFILE_DIR / "portable_model_attack.toml"
+    profile = _scaled(load_profile(source))
+    profile["experiment"]["num_clients"] = 5
+    profile["experiment"]["rounds"] = 1
+    profile["dataset"]["samples_per_client"] = 32
+    profile["dataset"]["central_test_size"] = 64
+    profile["training"]["batch_size"] = 16
+    profile["attack"]["mechanism"] = "sign_flip"
+    profile["attack"]["malicious_fraction"] = 0.2
+    profile["attack"]["schedule"] = {
+        "type": "continuous",
+        "start_round": 1,
+        "end_round": 1,
+    }
+    profile["aggregation"] = aggregation_config
+    profile["storage"]["probe_size"] = 24
+
+    profile_path = tmp_path / f"aggregation-{aggregation_name}.json"
+    profile_path.write_text(json.dumps(profile), encoding="utf-8")
+    run_dir = tmp_path / f"aggregation-{aggregation_name}"
+    completed = subprocess.run(
+        build_command(profile_path, output_dir=run_dir),
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=300,
+    )
+    assert completed.returncode == 0, completed.stdout
+
+    resolved = json.loads(
+        (run_dir / "resolved_profile.json").read_text(encoding="utf-8")
+    )
+    assert resolved["aggregation"]["name"] == aggregation_name
+
+    h5_path = run_dir / "round_state.h5"
+    assert h5_path.exists(), completed.stdout
+    assert not validate(h5_path)
+    with h5py.File(h5_path, "r") as h5:
+        assert int(h5["meta"].attrs["last_complete_round"]) == 1
+        assert "round_0001" in h5["global"]
+        assert len(h5["clients"]["round_0001"]) == 5
+
+
 @pytest.mark.parametrize("profile_name", PROFILE_CASES)
 def test_profile_runs_without_hydra(tmp_path: Path, profile_name: str):
     source = PROFILE_DIR / profile_name
