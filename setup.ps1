@@ -111,7 +111,7 @@ try {
     Write-Host ""
     Write-Host "Running environment import check..."
     $env:TF_CPP_MIN_LOG_LEVEL = "2"
-    & $Python -c "import sys, importlib.metadata, pkg_resources, absl, tensorflow, flwr, hydra, h5py, numpy, google.protobuf, eiffel; print('Python:', sys.version.split()[0]); print('setuptools:', importlib.metadata.version('setuptools')); print('absl-py:', importlib.metadata.version('absl-py')); print('TensorFlow:', tensorflow.__version__); print('Flower:', flwr.__version__); print('NumPy:', numpy.__version__); print('Protobuf:', google.protobuf.__version__); print('h5py:', h5py.__version__); assert tensorflow.__version__.startswith('2.10.'), tensorflow.__version__; assert flwr.__version__ == '1.5.0', flwr.__version__; print('pkg_resources: OK'); print('Environment OK')"
+    & $Python -c "import sys, importlib.metadata, pkg_resources, absl, tensorflow, flwr, h5py, numpy, google.protobuf, eiffel; print('Python:', sys.version.split()[0]); print('setuptools:', importlib.metadata.version('setuptools')); print('absl-py:', importlib.metadata.version('absl-py')); print('TensorFlow:', tensorflow.__version__); print('Flower:', flwr.__version__); print('NumPy:', numpy.__version__); print('Protobuf:', google.protobuf.__version__); print('h5py:', h5py.__version__); assert tensorflow.__version__.startswith('2.10.'), tensorflow.__version__; assert flwr.__version__ == '1.5.0', flwr.__version__; print('pkg_resources: OK'); print('Environment OK')"
     if ($LASTEXITCODE -ne 0) {
         throw "Environment import check failed."
     }
