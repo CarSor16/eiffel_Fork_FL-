@@ -20,8 +20,17 @@ PROFILE_CASES = (
     "synthetic_50k_quick_clean.toml",
     "synthetic_50k_label_flip.toml",
     "synthetic_50k_sign_flip.toml",
+    "synthetic_50k_model_scaling.toml",
+    "synthetic_50k_gaussian_noise.toml",
+    "synthetic_50k_lie.toml",
+    "synthetic_50k_gradient_mimicry.toml",
+    "synthetic_50k_colluding_sign_flip.toml",
     "synthetic_50k_min_max.toml",
+    "synthetic_50k_min_sum.toml",
+    "synthetic_50k_adaptive_stealth.toml",
+    "synthetic_50k_heterogeneity_aware_mimicry.toml",
     "synthetic_50k_targeted_family_poisoning.toml",
+    "portable_model_attack.toml",
 )
 
 
