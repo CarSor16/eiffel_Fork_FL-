@@ -129,6 +129,169 @@ def test_aggregation_backend_runs_end_to_end(
         assert len(h5["clients"]["round_0001"]) == 5
 
 
+
+
+@pytest.mark.parametrize(
+    ("task", "model_name", "model_config"),
+    [
+        ("binary", "p4p_mlp", {"name": "p4p_mlp", "dropout": 0.1}),
+        ("binary", "cnn1d", {"name": "cnn1d", "dropout": 0.1}),
+        (
+            "binary",
+            "ft_transformer",
+            {
+                "name": "ft_transformer",
+                "d_token": 8,
+                "n_heads": 2,
+                "n_blocks": 1,
+                "ff_factor": 2.0,
+                "dropout": 0.1,
+            },
+        ),
+        ("multiclass", "p4p_mlp", {"name": "p4p_mlp", "dropout": 0.1}),
+        ("multiclass", "cnn1d", {"name": "cnn1d", "dropout": 0.1}),
+        (
+            "multiclass",
+            "ft_transformer",
+            {
+                "name": "ft_transformer",
+                "d_token": 8,
+                "n_heads": 2,
+                "n_blocks": 1,
+                "ff_factor": 2.0,
+                "dropout": 0.1,
+            },
+        ),
+    ],
+)
+def test_model_family_runs_end_to_end_for_binary_and_multiclass(
+    tmp_path: Path,
+    task: str,
+    model_name: str,
+    model_config: dict,
+):
+    source = PROFILE_DIR / "portable_model_attack.toml"
+    profile = _scaled(load_profile(source))
+    profile["experiment"]["num_clients"] = 2
+    profile["experiment"]["rounds"] = 1
+    profile["dataset"]["task"] = task
+    profile["dataset"]["samples_per_client"] = 32
+    profile["dataset"]["central_test_size"] = 64
+    profile["dataset"]["num_features"] = 8
+    profile["dataset"]["num_classes"] = 4 if task == "multiclass" else 2
+    profile["model"] = model_config
+    profile["training"]["batch_size"] = 16
+    profile["attack"] = {
+        "mechanism": "none",
+        "malicious_fraction": 0.0,
+        "schedule": {"type": "continuous", "start_round": 1, "end_round": 1},
+    }
+    profile["aggregation"] = {"name": "fedavg"}
+    profile["defense"] = {"name": "none"}
+    profile["storage"]["probe_size"] = 24
+
+    profile_path = tmp_path / f"model-{task}-{model_name}.json"
+    profile_path.write_text(json.dumps(profile), encoding="utf-8")
+    run_dir = tmp_path / f"model-{task}-{model_name}"
+    completed = subprocess.run(
+        build_command(profile_path, output_dir=run_dir),
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=300,
+    )
+    assert completed.returncode == 0, completed.stdout
+
+    resolved = json.loads(
+        (run_dir / "resolved_profile.json").read_text(encoding="utf-8")
+    )
+    assert resolved["model"]["name"] == model_name
+    assert resolved["model"]["task"] == task
+    if task == "multiclass":
+        assert resolved["model"]["num_classes"] == 4
+
+    h5_path = run_dir / "round_state.h5"
+    assert h5_path.exists(), completed.stdout
+    assert not validate(h5_path)
+    with h5py.File(h5_path, "r") as h5:
+        assert int(h5["meta"].attrs["last_complete_round"]) == 1
+        assert "round_0001" in h5["global"]
+
+
+@pytest.mark.parametrize(
+    ("defense_name", "defense_config"),
+    [
+        ("norm_clipping", {"name": "norm_clipping", "max_norm": 1.0}),
+        (
+            "probe_distillation",
+            {
+                "name": "probe_distillation",
+                "temperature": 2.0,
+                "learning_rate": 0.001,
+                "alpha": 0.5,
+                "epochs": 1,
+            },
+        ),
+    ],
+)
+def test_defense_runs_end_to_end(
+    tmp_path: Path,
+    defense_name: str,
+    defense_config: dict,
+):
+    source = PROFILE_DIR / "portable_model_attack.toml"
+    profile = _scaled(load_profile(source))
+    profile["experiment"]["num_clients"] = 3
+    profile["experiment"]["rounds"] = 1
+    profile["dataset"]["samples_per_client"] = 32
+    profile["dataset"]["central_test_size"] = 64
+    profile["dataset"]["num_features"] = 8
+    profile["model"] = {
+        "name": "stress_mlp",
+        "hidden1": 8,
+        "hidden2": 4,
+        "weight_decay": 0.0,
+    }
+    profile["training"]["batch_size"] = 16
+    profile["attack"] = {
+        "mechanism": "sign_flip",
+        "malicious_fraction": 1.0 / 3.0,
+        "strength": 2.0,
+        "schedule": {"type": "continuous", "start_round": 1, "end_round": 1},
+    }
+    profile["aggregation"] = {"name": "fedavg"}
+    profile["defense"] = defense_config
+    profile["storage"]["probe_size"] = 24
+    profile["storage"]["capture_inference"] = True
+    profile["storage"]["capture_logits"] = True
+    profile["storage"]["capture_probe_features"] = True
+
+    profile_path = tmp_path / f"defense-{defense_name}.json"
+    profile_path.write_text(json.dumps(profile), encoding="utf-8")
+    run_dir = tmp_path / f"defense-{defense_name}"
+    completed = subprocess.run(
+        build_command(profile_path, output_dir=run_dir),
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=300,
+    )
+    assert completed.returncode == 0, completed.stdout
+
+    h5_path = run_dir / "round_state.h5"
+    assert h5_path.exists(), completed.stdout
+    assert not validate(h5_path)
+    with h5py.File(h5_path, "r") as h5:
+        metadata = h5["rounds"]["round_0001"].attrs
+        recorded = metadata["defense"]
+        if isinstance(recorded, bytes):
+            recorded = recorded.decode("utf-8")
+        assert str(recorded) == defense_name
+        assert int(h5["meta"].attrs["last_complete_round"]) == 1
+
+
 @pytest.mark.parametrize("profile_name", PROFILE_CASES)
 def test_profile_runs_without_hydra(tmp_path: Path, profile_name: str):
     source = PROFILE_DIR / profile_name
