@@ -4,10 +4,8 @@ import functools
 import json
 import logging
 import math
-from copy import deepcopy
 from functools import partial, reduce
-from types import NoneType
-from typing import Any, Callable, Type
+from typing import Callable
 
 import numpy as np
 import psutil
@@ -24,7 +22,6 @@ from eiffel.core.errors import ConfigError
 from eiffel.datasets.dataset import Dataset
 from eiffel.datasets.partitioners import DumbPartitioner, Partitioner
 from eiffel.datasets.poisoning import PoisonIns
-from eiffel.utils import set_seed
 from eiffel.utils.time import timeit
 from eiffel.utils.typing import ConfigDict, MetricsDict
 
@@ -33,23 +30,6 @@ from .pool import Pool
 from .results import Results
 
 logger = logging.getLogger(__name__)
-
-# Hydra/OmegaConf configuration objects are no longer accepted by the public
-# runtime. These aliases keep old type annotations harmless during migration.
-DictConfig = dict
-ListConfig = list
-
-def instantiate_or_return(obj, typ):
-    if isinstance(obj, typ):
-        return obj
-    raise TypeError(
-        "Hydra configuration objects are no longer supported; pass concrete "
-        f"Python objects instead (got {type(obj)})."
-    )
-
-def instantiate(*args, **kwargs):
-    raise TypeError("Hydra _target_ configurations are no longer supported.")
-
 
 class Experiment:
     """Eiffel experiment.
@@ -86,80 +66,47 @@ class Experiment:
         num_rounds: int,
         num_epochs: int,
         batch_size: int,
-        model_fn: Callable[..., tf.keras.Model] | DictConfig,
-        pools: list[Pool | DictConfig],
-        datasets: list[Dataset | DictConfig],
-        attacks: list[PoisonIns | dict | DictConfig],
+        model_fn: Callable[..., tf.keras.Model],
+        pools: list[Pool | dict],
+        datasets: list[Dataset],
+        attacks: list[PoisonIns | dict | None],
         strategy: partial[Strategy] | Strategy | None = None,
         server: Server | None = None,
-        partitioner: Partitioner | DictConfig | None = None,
-        storage: dict | DictConfig | None = None,
+        partitioner: Callable[..., Partitioner] | None = None,
+        storage: dict | None = None,
         max_concurrent_clients: int | None = None,
     ):
-        """Initialize the experiment.
+        """Initialize one Flower experiment from concrete Python components.
 
-        The `expriment` object is a wrapper around the Flower server. It is responsible
-        for instantiating the server, the clients, and the strategy. It also handles the
-        data partitioning and the attack configuration.
-
-        Initialization relies mostly on three configurations objects obtained from
-        Hydra, and thereafter mapped together to create the experiment's setup:
-
-        - `pools`: the list of client pools. Each pool is a DictConfig object
-            containing, or an instantiated Pool object. If a dictionary, it should
-            contain, at the very least, the number of clients in the pools as:
-            `{n_benign: int, n_malicious: int}`.
-        - `datasets`: the list of datasets used by the clients. Each dataset is a
-          DictConfig object that can be passed to Hydra's instantiation logic for a
-          `load_data` fonction, or a Dataset object.
-        - `attacks`: the attack configuration as: `{type: str, profile: str}`, or a list
-          of PoisonIns objects.
-
-        The number of pools is defined by the length of the `pools` list. If a single
-        element is provided, ie. if the length of the list is 1, then the attack or
-        dataset is used by all pools. Otherwise, the length of the list should be equal
-        to the number of pools.
-
-        If the number of datasets is 1, then the evaluation can be done centrally by the
-        server. Otherwise, the evaluation is done by each client, and the distributed
-        metrics are aggregated afterwards. This can be disabled using the
-        `distributed_evaluation` flag, which is set to `False` by default.
+        The direct TOML runtime resolves datasets, model factories, partitioners,
+        attack instructions and strategies before constructing this object. A pool
+        entry may be either an already-built :class:`Pool` or a plain dictionary
+        containing the arguments required to build one.
 
         Parameters
         ----------
         seed : int
-            The seed for reproducibility.
+            Reproducibility seed.
         num_rounds : int
-            The number of rounds to run.
+            Number of Flower communication rounds.
         num_epochs : int
-            The number of epochs to run on each client.
+            Local epochs per client and round.
         batch_size : int
-            The batch size to use.
-        model_fn : Callable[..., tf.keras.Model] | DictConfig
-            A function that returns a compiled Keras model. Each client process will run
-            this function to instantiate its model. If a DictConfig object is provided,
-            the function is instantiated using Hydra's instantiation logic and MUST
-            return a `functool.partial` object, using `_partial_: True`. Overall, it is
-            recommanded to pass a partial function.
-        pools : list[Pool | DictConfig]
-            The list of client pools.
-        datasets : list[Dataset | DictConfig]
-            The datasets to use per pool.
-        attacks : list[PoisonIns | dict | DictConfig]
-            The attacks to use per pool.
-        strategy : Strategy | DictConfig | None, optional
-            The Flower-compatible strategy to use. Defaults to
-            `flwr.server.strategy.FedAvg` if None.
-        server : Server | DictConfig | None, optional
-            The Flower server. Defaults to the default Flower server if None.
-        partitioner : Partitioner | DictConfig | None, optional
-            The partitioner to use. Defaults to `DumbPartitioner` if None.
-
-        Raises
-        ------
-        ConfigError
-            If the number of pools is not equal to the number of datasets or the number
-            of attacks.
+            Local training batch size.
+        model_fn : Callable
+            Factory returning a compiled Keras model.
+        pools : list[Pool | dict]
+            Client pools or plain pool constructor arguments.
+        datasets : list[Dataset]
+            Concrete datasets, one per pool or one shared by all pools.
+        attacks : list[PoisonIns | dict | None]
+            Optional data-poisoning instructions.
+        strategy : Strategy | partial[Strategy] | None
+            Flower aggregation strategy. Defaults to FedAvg.
+        partitioner : Callable[..., Partitioner] | None
+            Partitioner factory. Defaults to DumbPartitioner.
+        storage : dict | None
+            Round-state capture options used by instrumented strategies.
         """
         self.seed = seed
         # set_seed(seed)
@@ -176,43 +123,35 @@ class Experiment:
 
         for pool, attack, dataset in pools_mapping:
             if not isinstance(dataset, Dataset):
-                dataset = instantiate_or_return(dataset, Dataset)
+                raise TypeError(
+                    "datasets must contain concrete Dataset objects; "
+                    f"got {type(dataset)}."
+                )
 
-            if not isinstance(attack, (PoisonIns, NoneType)):
-                if isinstance(attack, dict | DictConfig):
-                    if "n_rounds" not in attack:
-                        attack["n_rounds"] = num_rounds
-                    attack = PoisonIns.from_dict(
-                        dict(attack), default_target=dataset.default_target
-                    )
-                else:
+            if attack is not None and not isinstance(attack, PoisonIns):
+                if not isinstance(attack, dict):
                     raise TypeError(
-                        "`attack` must be a PoisonIns, a valid PoisonIns "
-                        f"configuration dictionary, or None; got {type(attack)}."
+                        "`attack` must be a PoisonIns, dictionary or None; "
+                        f"got {type(attack)}."
                     )
+                attack_config = dict(attack)
+                attack_config.setdefault("n_rounds", num_rounds)
+                attack = PoisonIns.from_dict(
+                    attack_config, default_target=dataset.default_target
+                )
 
-            if isinstance(pool, (DictConfig, dict)):
-                if "_target_" in pool:
-                    pool = instantiate(
-                        pool,
-                        partitioner=instantiate_or_return(partitioner, partial),
-                        dataset=instantiate_or_return(dataset, Dataset),
-                        attack=attack,
-                        model_fn=instantiate_or_return(model_fn, partial),
-                        seed=self.seed,
-                    )
-                else:
-                    pool = Pool(
-                        dataset=instantiate_or_return(dataset, Dataset),
-                        model_fn=instantiate_or_return(model_fn, partial),
-                        partitioner=instantiate_or_return(partitioner, partial),
-                        attack=attack,
-                        seed=self.seed,
-                        **{str(k): v for k, v in pool.items()},
-                    )
+            if isinstance(pool, dict):
+                pool = Pool(
+                    dataset=dataset,
+                    model_fn=model_fn,
+                    partitioner=partitioner or DumbPartitioner,
+                    attack=attack,
+                    seed=self.seed,
+                    **{str(k): v for k, v in pool.items()},
+                )
             elif not isinstance(pool, Pool):
                 raise ConfigError(
-                    f"Invalid pool type: {type(pool)}. Expected a Pool object."
+                    f"Invalid pool type: {type(pool)}. Expected Pool or dict."
                 )
             self.pools.append(pool)
 
@@ -343,9 +282,10 @@ class Experiment:
         return {p.pool_id: p.shards_stats for p in self.pools}
 
 
-def get_random_weights(model_config: DictConfig, n_features: int) -> list[np.ndarray]:
-    """Get random weights for a model."""
-    model_fn = instantiate_or_return(model_config, partial)
+def get_random_weights(
+    model_fn: Callable[..., tf.keras.Model], n_features: int
+) -> list[np.ndarray]:
+    """Get deterministic initial weights from a model factory."""
     model: Model = model_fn(n_features)
     return ndarrays_to_parameters(model.get_weights())
 
@@ -420,17 +360,14 @@ def compute_client_resources(
     }
 
 
-def obj_to_list(
-    config_obj: ListConfig | DictConfig | list,
-    expected_length: int = 0,
-) -> list:
-    """Convert a DictConfig or ListConfig object to a list."""
-    if not isinstance(config_obj, (ListConfig, list, DictConfig, dict, NoneType)):
+def obj_to_list(config_obj, expected_length: int = 0) -> list:
+    """Normalize a scalar/list configuration value to a plain list."""
+    if not isinstance(config_obj, (list, dict, type(None), Pool, Dataset, PoisonIns)):
         raise ConfigError(
-            f"Invalid config object: {type(config_obj)}. Expected a list or dictionary."
+            f"Invalid config object: {type(config_obj)}."
         )
 
-    if not isinstance(config_obj, (list, ListConfig)):
+    if not isinstance(config_obj, list):
         config_obj = [config_obj]
 
     if expected_length > 0:
