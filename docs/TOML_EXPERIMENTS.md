@@ -17,24 +17,24 @@ PowerShell:
 or directly:
 
 ```powershell
-python -m eiffel.toml_runner experiments\toml\smoke_clean.toml
+python -m eiffel.direct_runner experiments\toml\smoke_clean.toml
 ```
 
 Validate/inspect the resolved experiment configuration without starting Flower:
 
 ```powershell
-python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml --dry-run
+python -m eiffel.direct_runner experiments\toml\smoke_sign_flip.toml --dry-run
 ```
 
 Temporary overrides can be appended using `dotted.path=value`:
 
 ```powershell
-python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml model=cnn1d
+python -m eiffel.direct_runner experiments\toml\smoke_sign_flip.toml model=cnn1d
 ```
 
 ## TOML sections
 
-The compatibility layer currently understands:
+The direct runtime currently understands:
 
 - `[experiment]`: seed, total number of clients, rounds
 - `[dataset]`: registered dataset alias and dataset-specific parameters
@@ -230,7 +230,7 @@ round.
 
 ## Current limitation
 
-The TOML compatibility layer currently supports `aggregation.name = "fedavg"`.
+The direct TOML runtime currently supports `aggregation.name = "fedavg"`.
 
 The old `noniid_sign_flip_trimmed.toml` profile is intentionally not copied as a
 runnable profile yet because mapping it silently to FedAvg would change the scientific
@@ -252,7 +252,7 @@ models use a K-way softmax output with sparse categorical cross-entropy. Procedu
 model-update attacks remain unchanged because they operate on parameter deltas rather
 than class labels.
 
-Multiclass label_flip is intentionally rejected by the TOML translator. Eiffel's
+Multiclass label_flip is intentionally rejected by the TOML resolver. Eiffel's
 existing NFV2 poisoning method is Boolean label inversion; applying it to labels 0..K-1
 would not define a valid class-to-class poisoning objective. A later implementation
 should introduce explicit source_class and destination_class semantics before enabling
