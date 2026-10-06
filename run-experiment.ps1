@@ -344,6 +344,7 @@ try {
             "eiffel\core\tests\model_attacks_test.py",
             "eiffel\core\tests\aggregation_test.py",
             "eiffel\core\tests\defense_test.py",
+            "eiffel\core\tests\control_plane_test.py",
             "eiffel\core\tests\label_flip_attack_test.py",
             "eiffel\core\tests\multiclass_models_test.py",
             "eiffel\core\tests\inference_capture_test.py",
