@@ -22,6 +22,11 @@ from eiffel.analysis.update_audit import audit_updates
 from eiffel.attacks.model import apply_round_attack
 from eiffel.storage import RoundStore, decode_array
 from eiffel.strategy.aggregation import aggregate_updates, canonical_aggregation_name
+from eiffel.strategy.defense import (
+    apply_update_defense,
+    canonical_defense_name,
+    distill_global_weights,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +71,8 @@ class InstrumentedStrategy(FedAvg):
         storage: Mapping[str, Any] | None = None,
         model_attack: Mapping[str, Any] | None = None,
         aggregation: Mapping[str, Any] | None = None,
+        defense: Mapping[str, Any] | None = None,
+        model_fn: Any | None = None,
         num_rounds: int | None = None,
         seed: int = 0,
         **kwargs,
@@ -79,6 +86,11 @@ class InstrumentedStrategy(FedAvg):
         self.aggregation_cfg["name"] = canonical_aggregation_name(
             str(self.aggregation_cfg.get("name", "fedavg"))
         )
+        self.defense_cfg = _plain(defense or {"name": "none"})
+        self.defense_cfg["name"] = canonical_defense_name(
+            str(self.defense_cfg.get("name", "none"))
+        )
+        self.model_fn = model_fn
         self.num_rounds = num_rounds
         self.seed = int(seed)
         self._round_log_state: dict[int, dict[str, Any]] = {}
@@ -360,7 +372,11 @@ class InstrumentedStrategy(FedAvg):
             else float(data_round_fraction)
         )
 
-        audits = audit_updates(submitted_updates)
+        defended_updates = apply_update_defense(
+            submitted_updates,
+            self.defense_cfg,
+        )
+        audits = audit_updates(defended_updates)
 
         for idx, client in enumerate(clients):
             malicious = malicious_mask[idx]
@@ -382,7 +398,7 @@ class InstrumentedStrategy(FedAvg):
             self.store.save_client(
                 int(server_round),
                 cid,
-                submitted_update=submitted_updates[idx],
+                submitted_update=defended_updates[idx],
                 pre_attack_update=pre_updates[idx] if model_changed else None,
                 audit=audits[idx],
                 probabilities=probabilities[idx],
@@ -417,6 +433,7 @@ class InstrumentedStrategy(FedAvg):
             attack_multiplier=round_attack_multiplier,
             malicious_clients=malicious_clients,
             aggregation_name=str(self.aggregation_cfg.get("name", "fedavg")),
+            defense_name=str(self.defense_cfg.get("name", "none")),
         )
         self._round_log_state[int(server_round)] = {
             "mechanism": mechanism,
@@ -424,10 +441,11 @@ class InstrumentedStrategy(FedAvg):
             "malicious_clients": malicious_clients,
             "fit_clients": len(results),
             "aggregation": str(self.aggregation_cfg.get("name", "fedavg")),
+            "defense": str(self.defense_cfg.get("name", "none")),
         }
 
         aggregated_update = aggregate_updates(
-            submitted_updates,
+            defended_updates,
             num_examples=[fit_res.num_examples for fit_res in fit_results],
             config=self.aggregation_cfg,
         )
@@ -435,6 +453,20 @@ class InstrumentedStrategy(FedAvg):
             np.asarray(global_ + delta, dtype=np.float32)
             for global_, delta in zip(self._global_weights, aggregated_update)
         ]
+        if self.defense_cfg.get("name") == "probe_distillation":
+            if self.model_fn is None:
+                raise RuntimeError(
+                    "probe_distillation requires the experiment model factory."
+                )
+            self._global_weights = distill_global_weights(
+                self._global_weights,
+                model_fn=self.model_fn,
+                probe_features=probe_features,
+                probabilities=probabilities,
+                logits=logits,
+                config=self.defense_cfg,
+                seed=self.seed + int(server_round),
+            )
         aggregated = ndarrays_to_parameters(self._global_weights)
         self.store.save_global(int(server_round), self._global_weights)
 
