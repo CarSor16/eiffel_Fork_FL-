@@ -22,7 +22,7 @@ From the repository root, the shortest setup is:
 .\setup.cmd
 ```
 
-`setup.cmd` checks Python 3.10, creates `.venv`, installs Eiffel plus its runtime dependencies, and verifies imports for TensorFlow, Flower, Hydra, HDF5, and Eiffel.
+`setup.cmd` checks Python 3.10, creates `.venv`, installs Eiffel plus its runtime dependencies, and verifies imports for TensorFlow, Flower, HDF5, and Eiffel.
 
 Then validate the environment and TOML configuration layer:
 
@@ -399,7 +399,7 @@ Then run:
 Focused tests for the new experiment layer:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest eiffel\core\tests\toml_runner_test.py
+.\.venv\Scripts\python.exe -m pytest eiffel\core\tests\direct_runner_test.py
 .\.venv\Scripts\python.exe -m pytest eiffel\core\tests\synthetic_stress_test.py
 ```
 
@@ -491,9 +491,9 @@ Currently supported schedules are:
 Example:
 
 ```bash
-model_attack=gradient_mimicry \
-model_attack.schedule.type=late \
-model_attack.schedule.start_round=6
+attack.mechanism=gradient_mimicry \
+attack.schedule.type=late \
+attack.schedule.start_round=6
 ```
 
 This allows experiments where the adversary remains benign during the first rounds, attacks only inside a specific time window, alternates between benign and malicious behaviour, or gradually increases attack intensity.
@@ -890,13 +890,13 @@ The lower-level entrypoints are still available:
 
 ```powershell
 .\run-toml.ps1 experiments\toml\smoke_sign_flip.toml
-python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml
+python -m eiffel.direct_runner experiments\toml\smoke_sign_flip.toml
 ```
 
 To validate the profile and inspect the fully resolved configuration without starting the simulation:
 
 ```powershell
-python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml --dry-run
+python -m eiffel.direct_runner experiments\toml\smoke_sign_flip.toml --dry-run
 ```
 
 The direct configuration layer supports the current attack set, temporal schedules, model choice, Dirichlet non-IID partitioning, HDF5 storage, the restored 50k synthetic benchmark, and NF-V2 dataset aliases. Synthetic and real-data profiles are kept separate so framework validation is not confused with real NIDS evaluation.
