@@ -8,7 +8,7 @@ The purpose of this fork is to extend Eiffel into a reusable experimental platfo
 
 The current focus is Federated Intrusion Detection Systems (FL-NIDS/FIDS), with particular attention to poisoning attacks, non-IID client data, malicious-client coordination, update-space auditability, temporal attack behaviour, and comparison across different neural architectures.
 
-The original Eiffel design is intentionally preserved where possible: Hydra remains the experiment configuration system, Flower remains the FL runtime, and TensorFlow/Keras remains the model framework. The extensions in this fork are added around that architecture rather than replacing it.
+The original Eiffel learning stack is intentionally preserved where it affects the experiments: **Flower remains the Federated Learning runtime and TensorFlow/Keras remains the model framework**. The configuration layer has been simplified in this fork: TOML is now the single experiment format and is resolved directly into Python factories, without Hydra/OmegaConf.
 
 ---
 
@@ -168,7 +168,7 @@ Validate the whole suite without training:
 .\run.cmd -Suite synthetic50k -DryRun
 ```
 
-Extra Hydra overrides can still be appended for quick exploratory runs, for example:
+Temporary TOML overrides can be appended for quick exploratory runs using `dotted.path=value`, for example:
 
 ```powershell
 .\run.cmd synthetic_50k_quick_sign_flip storage.capture_inference=false
@@ -283,7 +283,7 @@ For multi-seed, explicit-attacker, strength and schedule sweeps, use
 
 ### Where results are saved
 
-Hydra creates one run directory under a dataset-scoped tree. Examples:
+The direct TOML runner creates one run directory under a dataset-scoped tree. Examples:
 
 ```text
 outputs/mirage/YYYY-MM-DD/HH-MM-SS/
@@ -293,9 +293,9 @@ outputs/ciciot/family/YYYY-MM-DD/HH-MM-SS/
 outputs/ciciot/fine/YYYY-MM-DD/HH-MM-SS/
 ```
 
-Typical run artifacts include `stats.json`, Hydra's `.hydra/` configuration files, normal Eiffel metrics, and—when instrumented storage is enabled—`round_state.h5`.
+Typical run artifacts include `input_profile.json`, `resolved_profile.json`, `stats.json`, normal Eiffel metrics, and—when instrumented storage is enabled—`round_state.h5`.
 
-Because the default HDF5 path is relative, `round_state.h5` is written inside the corresponding Hydra run directory.
+`input_profile.json` preserves the effective user input and `resolved_profile.json` records the fully normalized configuration used to construct the experiment. Because the default HDF5 path is relative, `round_state.h5` is written inside the same run directory.
 
 ### Dependency versions used by the supported Windows setup
 
@@ -831,7 +831,7 @@ and
 model poisoning
 ```
 
-under a common Flower/Hydra experimental framework.
+under a common Flower-based experimental framework.
 
 ---
 
@@ -872,7 +872,7 @@ For thesis runs, prefer saving the model choice directly in a dedicated TOML pro
 
 ## TOML experiment workflow
 
-The previous Flower attack lab used one TOML file per experiment. This fork keeps that workflow while Eiffel continues to use Hydra internally.
+The previous Flower attack lab used one TOML file per experiment. This fork keeps that workflow and now uses TOML directly as Eiffel's experiment configuration backend.
 
 Runnable profiles are stored in:
 
@@ -886,20 +886,20 @@ For normal use, prefer the unified launcher:
 .\run.cmd smoke_sign_flip
 ```
 
-The lower-level compatibility entrypoints are still available:
+The lower-level entrypoints are still available:
 
 ```powershell
 .\run-toml.ps1 experiments\toml\smoke_sign_flip.toml
 python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml
 ```
 
-To validate the profile and inspect the generated Eiffel/Hydra command without starting the simulation:
+To validate the profile and inspect the fully resolved configuration without starting the simulation:
 
 ```powershell
 python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml --dry-run
 ```
 
-The compatibility layer supports the current attack set, temporal schedules, model choice, Dirichlet non-IID partitioning, HDF5 storage, the restored 50k synthetic benchmark, and NF-V2 dataset aliases. Synthetic and real-data profiles are kept separate so framework validation is not confused with real NIDS evaluation.
+The direct configuration layer supports the current attack set, temporal schedules, model choice, Dirichlet non-IID partitioning, HDF5 storage, the restored 50k synthetic benchmark, and NF-V2 dataset aliases. Synthetic and real-data profiles are kept separate so framework validation is not confused with real NIDS evaluation.
 
 See [docs/TOML_EXPERIMENTS.md](docs/TOML_EXPERIMENTS.md) for the complete mapping and supported fields.
 
@@ -943,31 +943,9 @@ A complete attack suite can be started with:
 
 ## Configuration
 
-Eiffel uses Hydra.
+TOML files under `experiments/toml/` are the single user-facing configuration source. `eiffel.direct_runner` validates a profile, resolves defaults and aliases, creates concrete Python dataset/model/partitioner/strategy objects, and then starts Flower.
 
-The main configuration remains:
-
-```text
-eiffel/conf/eiffel.yaml
-```
-
-Additional configuration groups introduced by this fork include:
-
-```text
-eiffel/conf/model/
-eiffel/conf/model_attack/
-eiffel/conf/storage/
-```
-
-The instrumented strategy is:
-
-```text
-strategy=instrumented_fedavg
-```
-
-and is currently the default strategy of this research fork.
-
-The original Flower FedAvg configuration remains available:
+The research runtime uses `InstrumentedFedAvg`, a Flower `FedAvg` subclass that adds model-poisoning hooks, round-state persistence and update auditing while delegating the final aggregation to Flower.
 
 ```text
 strategy=fedavg
@@ -1045,15 +1023,15 @@ More detailed implementation notes are available in:
 
 ---
 
-## Original Eiffel usage
+## Direct Eiffel usage
 
-Eiffel can be used as an experiment engine by providing a Hydra configuration.
+Run a committed TOML profile directly with:
 
 ```bash
-python -m eiffel -cd path/to/workdir/
+python -m eiffel experiments/toml/synthetic_50k_quick_clean.toml
 ```
 
-By default, Eiffel looks for a Git repository in the current directory or one of its parents. The repository root is used as Hydra's working anchor for `outputs/` and `multirun/`.
+or use `python -m eiffel.direct_runner` explicitly. Output directories are created below the repository `outputs/` tree unless `--output-dir` is supplied. Campaign sweeps are handled by `python -m eiffel.campaign_runner`.
 
 ---
 
@@ -1261,15 +1239,13 @@ Custom input/output roots are supported by both analysis modes:
 
     .\run.cmd -Analyze -RunsRoot "outputs" -AnalysisOutput "analysis-results"
 
-### Hydra and TOML
+### TOML configuration backend
 
-Hydra has not been removed. The supported workflow remains TOML experiment profile ->
-eiffel.toml_runner -> Hydra composition/overrides -> EIFFeL + Flower.
+Hydra/OmegaConf have been removed from the experimental runtime. The supported workflow is:
 
-TOML is the stable user-facing experiment description, while Hydra remains useful for
-configuration groups, command-line overrides, reproducibility, output directories and
-future sweeps. A normal named TOML experiment can still receive a temporary Hydra
-override from .\run.cmd without changing the committed profile.
+`TOML profile -> direct validation/resolution -> Python factories -> EIFFeL Experiment -> Flower`.
+
+A normal named experiment can receive a temporary `dotted.path=value` override from `.\run.cmd` without changing the committed TOML. Every run stores both the effective input profile and the resolved profile so reproducibility does not depend on an implicit configuration layer.
 
 
 ---
