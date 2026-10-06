@@ -134,6 +134,9 @@ class InstrumentedStrategy(FedAvg):
             defense=self.defense_cfg,
             changes=changes,
         )
+        mechanism = str(self.attack_cfg.get("mechanism", "none")).strip().lower()
+        self.attack_cfg["mechanism"] = mechanism
+        self.attack_cfg["enabled"] = mechanism != "none"
         self.aggregation_cfg["name"] = canonical_aggregation_name(
             str(self.aggregation_cfg.get("name", "fedavg"))
         )
