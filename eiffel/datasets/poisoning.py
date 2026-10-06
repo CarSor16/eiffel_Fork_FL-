@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-from omegaconf import DictConfig
 
 from eiffel.core.errors import ConfigError
 
@@ -89,7 +88,7 @@ class PoisonIns:
     @classmethod
     def from_dict(cls, d: dict, default_target: list[str]) -> "PoisonIns":
         """Initialize the PoisonIns object from a dictionary."""
-        if isinstance(d, dict | DictConfig):
+        if isinstance(d, dict):
             if not ("type" in d and "profile" in d and "n_rounds" in d):
                 raise ConfigError(
                     "Invalid configuration for `d`, missing one of the "
