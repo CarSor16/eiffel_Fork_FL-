@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from eiffel.strategy.aggregation import canonical_aggregation_name
+from eiffel.strategy.defense import canonical_defense_name
 
 try:
     import tomllib
@@ -268,6 +269,7 @@ def apply_overrides(profile: Mapping[str, Any], values: list[str] | None) -> dic
         "partition": "partition.type",
         "attack": "attack.mechanism",
         "aggregation": "aggregation.name",
+        "defense": "defense.name",
     }
     for raw in values or []:
         if "=" not in raw:
@@ -356,6 +358,7 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     attack = dict(_table(profile, "attack"))
     storage = dict(_table(profile, "storage"))
     aggregation = dict(_table(profile, "aggregation"))
+    defense = dict(_table(profile, "defense"))
 
     total = int(experiment.get("num_clients", 10))
     rounds = int(experiment.get("rounds", 10))
@@ -480,6 +483,49 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
                 )
             aggregation_cfg["num_selected"] = selected
 
+    defense_name = canonical_defense_name(str(defense.get("name", "none")))
+    defense_cfg: dict[str, Any] = {"name": defense_name}
+    if defense_name == "norm_clipping":
+        max_norm = float(defense.get("max_norm", 10.0))
+        if not np.isfinite(max_norm) or max_norm <= 0:
+            raise ExperimentConfigError("defense.max_norm must be finite and > 0.")
+        defense_cfg["max_norm"] = max_norm
+    if defense_name == "probe_distillation":
+        if not storage_cfg.get("enabled", True):
+            raise ExperimentConfigError(
+                "probe_distillation requires storage.enabled=true."
+            )
+        if not storage_cfg.get("capture_inference", True):
+            raise ExperimentConfigError(
+                "probe_distillation requires storage.capture_inference=true."
+            )
+        if not storage_cfg.get("capture_probe_features", True):
+            raise ExperimentConfigError(
+                "probe_distillation requires storage.capture_probe_features=true."
+            )
+        if int(storage_cfg.get("probe_size", 256)) <= 0:
+            raise ExperimentConfigError(
+                "probe_distillation requires storage.probe_size > 0."
+            )
+        temperature = float(defense.get("temperature", 2.0))
+        learning_rate = float(defense.get("learning_rate", 1e-4))
+        alpha = float(defense.get("alpha", 1.0))
+        epochs = int(defense.get("epochs", 1))
+        if not np.isfinite(temperature) or temperature <= 0:
+            raise ExperimentConfigError("defense.temperature must be finite and > 0.")
+        if not np.isfinite(learning_rate) or learning_rate <= 0:
+            raise ExperimentConfigError("defense.learning_rate must be finite and > 0.")
+        if not 0.0 <= alpha <= 1.0:
+            raise ExperimentConfigError("defense.alpha must be in [0, 1].")
+        if epochs < 1:
+            raise ExperimentConfigError("defense.epochs must be >= 1.")
+        defense_cfg.update(
+            temperature=temperature,
+            learning_rate=learning_rate,
+            alpha=alpha,
+            epochs=epochs,
+        )
+
     storage_cfg = dict(STORAGE_DEFAULTS)
     storage_cfg.update(storage)
     schedule = _schedule(attack, rounds)
@@ -583,6 +629,7 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
             "model_attack": model_attack, "data_poisoning": data_poison,
         },
         "aggregation": aggregation_cfg | {"implementation": "InstrumentedStrategy"},
+        "defense": defense_cfg,
         "storage": storage_cfg,
     }
 
@@ -764,6 +811,8 @@ def _build_experiment(resolved: Mapping[str, Any]):
         InstrumentedStrategy, storage=storage,
         model_attack=dict(resolved["attack"]["model_attack"]),
         aggregation=dict(resolved["aggregation"]),
+        defense=dict(resolved["defense"]),
+        model_fn=model_fn,
         num_rounds=rounds, seed=seed,
     )
     training = resolved["training"]
