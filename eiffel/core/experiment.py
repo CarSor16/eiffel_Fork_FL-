@@ -168,7 +168,7 @@ class Experiment:
         if isinstance(strategy, partial):
             strategy_name = getattr(strategy.func, "__name__", "")
             capture_inference = (
-                strategy_name == "InstrumentedFedAvg"
+                strategy_name in {"InstrumentedStrategy", "InstrumentedFedAvg"}
                 and storage is not None
                 and bool(storage.get("enabled", True))
                 and bool(storage.get("capture_inference", True))
