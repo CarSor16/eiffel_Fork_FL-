@@ -187,6 +187,29 @@ def test_probe_distillation_requires_probe_feature_capture():
         resolve_profile(profile)
 
 
+
+def test_control_plane_configuration_resolves_with_safe_defaults():
+    profile = _portable_profile("synthetic_stress")
+    resolved = resolve_profile(profile)
+    assert resolved["control"] == {
+        "enabled": False,
+        "path": "control.json",
+        "events_enabled": True,
+        "events_path": "events.jsonl",
+    }
+
+    profile["control"] = {
+        "enabled": True,
+        "path": "live-control.json",
+        "events_enabled": True,
+        "events_path": "live-events.jsonl",
+    }
+    resolved = resolve_profile(profile)
+    assert resolved["control"]["enabled"] is True
+    assert resolved["control"]["path"] == "live-control.json"
+    assert resolved["control"]["events_path"] == "live-events.jsonl"
+
+
 def test_sign_flip_resolves_to_plain_runtime_config():
     resolved = resolve_profile({
         "experiment": {"seed": 2026, "num_clients": 10, "rounds": 20},
