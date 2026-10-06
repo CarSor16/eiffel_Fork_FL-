@@ -33,6 +33,20 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _control_paths(root: Path) -> tuple[Path, Path, dict[str, Any]]:
+    resolved = _read_json(root / "resolved_profile.json")
+    control = resolved.get("control", {})
+    if not isinstance(control, dict):
+        control = {}
+    control_path = Path(str(control.get("path", "control.json")))
+    events_path = Path(str(control.get("events_path", "events.jsonl")))
+    if not control_path.is_absolute():
+        control_path = root / control_path
+    if not events_path.is_absolute():
+        events_path = root / events_path
+    return control_path, events_path, control
+
+
 def read_events(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -61,7 +75,8 @@ def _latest(events: list[dict[str, Any]], kind: str) -> dict[str, Any]:
 def status_text(run_dir: str | Path) -> str:
     root = Path(run_dir)
     resolved = _read_json(root / "resolved_profile.json")
-    events = read_events(root / "events.jsonl")
+    control_path, events_path, _ = _control_paths(root)
+    events = read_events(events_path)
     latest = _latest(events, "round_complete")
     started = _latest(events, "round_start")
 
@@ -108,7 +123,7 @@ def status_text(run_dir: str | Path) -> str:
         lines.append(
             f"Attack scale : {float(latest.get('attack_multiplier', 0.0)):.3f}"
         )
-    control = _read_json(root / "control.json")
+    control = _read_json(control_path)
     if control:
         lines.append("-" * 64)
         lines.append(
@@ -130,7 +145,13 @@ def publish_changes(
     apply_from_round: int,
 ) -> Path:
     root = Path(run_dir)
-    current = _read_json(root / "control.json")
+    control_path, _, control_cfg = _control_paths(root)
+    if control_cfg and not bool(control_cfg.get("enabled", False)):
+        raise RuntimeControlError(
+            "Runtime control is disabled for this run. Start it with "
+            "control.enabled=true."
+        )
+    current = _read_json(control_path)
     revision = int(current.get("revision", -1)) + 1
     changes: dict[str, Any] = {}
     for assignment in assignments:
@@ -141,7 +162,7 @@ def publish_changes(
         key, raw = assignment.split("=", 1)
         changes[key.strip()] = _parse_scalar(raw.strip())
     return write_control(
-        root / "control.json",
+        control_path,
         revision=revision,
         changes=changes,
         apply_from_round=int(apply_from_round),
@@ -168,7 +189,7 @@ def interactive(run_dir: str | Path) -> None:
 
     def event_printer() -> None:
         seen = 0
-        events_path = root / "events.jsonl"
+        _, events_path, _ = _control_paths(root)
         while not stop.is_set():
             events = read_events(events_path)
             if len(events) > seen:
