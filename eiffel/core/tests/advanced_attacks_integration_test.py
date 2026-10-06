@@ -14,6 +14,9 @@ from eiffel.direct_runner import build_command
 RAY_STARTUP_TIMEOUT_MARKERS = (
     "Timed out after 60 seconds while waiting for node to startup",
     "The current node timed out during startup",
+    "local variable 'num_cpus' referenced before assignment",
+    "Check failed: e.size() == ep.size()",
+    "has been marked dead because the detector has missed too many heartbeats",
 )
 
 
