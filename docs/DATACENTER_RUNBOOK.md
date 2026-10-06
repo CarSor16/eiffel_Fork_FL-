@@ -135,7 +135,7 @@ Results are grouped below:
 outputs/datacenter/<dataset>/<profile>/seed_<seed>/<timestamp>/
 ```
 
-Each run retains `round_state.h5`, Hydra configuration and Eiffel metric files.
+Each run retains `round_state.h5`, the resolved TOML profile and Eiffel metric files.
 
 ## Full sequential suite
 
