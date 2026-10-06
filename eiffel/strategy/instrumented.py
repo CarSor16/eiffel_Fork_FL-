@@ -26,15 +26,10 @@ logger = logging.getLogger(__name__)
 
 
 def _plain(value: Any) -> Any:
-    try:
-        from omegaconf import DictConfig, ListConfig, OmegaConf
-
-        if isinstance(value, (DictConfig, ListConfig)):
-            return OmegaConf.to_container(value, resolve=True)
-    except Exception:
-        pass
     if isinstance(value, Mapping):
         return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
     return value
 
 
