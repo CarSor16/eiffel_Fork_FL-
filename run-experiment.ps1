@@ -184,6 +184,11 @@ function Show-AttackHelp {
     Write-Host "TOML is the single configuration backend. Optional overrides use"
     Write-Host "dotted.path=value, for example: experiment.rounds=5 attack.strength=2.0"
     Write-Host ""
+    Write-Host "Defense / mitigation"
+    Write-Host "  none | norm_clipping | probe_distillation"
+    Write-Host "  Example: .\run.cmd portable_model_attack defense=norm_clipping defense.max_norm=5"
+    Write-Host "  Distillation: defense.temperature, defense.learning_rate, defense.alpha, defense.epochs"
+    Write-Host ""
     Write-Host "Aggregation backends"
     Write-Host "  fedavg | median | trimmed_mean | krum | multi_krum"
     Write-Host "  Example: .\run.cmd portable_model_attack aggregation=median"
@@ -338,6 +343,7 @@ try {
             "eiffel\core\tests\client_test.py",
             "eiffel\core\tests\model_attacks_test.py",
             "eiffel\core\tests\aggregation_test.py",
+            "eiffel\core\tests\defense_test.py",
             "eiffel\core\tests\label_flip_attack_test.py",
             "eiffel\core\tests\multiclass_models_test.py",
             "eiffel\core\tests\inference_capture_test.py",
