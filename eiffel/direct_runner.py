@@ -18,6 +18,8 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Mapping
 
+from eiffel.strategy.aggregation import canonical_aggregation_name
+
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -265,6 +267,7 @@ def apply_overrides(profile: Mapping[str, Any], values: list[str] | None) -> dic
         "dataset": "dataset.name",
         "partition": "partition.type",
         "attack": "attack.mechanism",
+        "aggregation": "aggregation.name",
     }
     for raw in values or []:
         if "=" not in raw:
@@ -448,8 +451,34 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
                 preserved_classes=list(partition.get("preserved_classes", ["Benign"])),
             )
 
-    if str(aggregation.get("name", "fedavg")).lower() != "fedavg":
-        raise ExperimentConfigError("Only fedavg is currently supported.")
+    aggregation_name = canonical_aggregation_name(
+        str(aggregation.get("name", "fedavg"))
+    )
+    aggregation_cfg: dict[str, Any] = {"name": aggregation_name}
+    if aggregation_name == "trimmed_mean":
+        trim_ratio = float(aggregation.get("trim_ratio", 0.2))
+        if not 0.0 <= trim_ratio < 0.5:
+            raise ExperimentConfigError("aggregation.trim_ratio must be in [0, 0.5).")
+        aggregation_cfg["trim_ratio"] = trim_ratio
+    if aggregation_name in {"krum", "multi_krum"}:
+        num_byzantine = int(aggregation.get("num_byzantine", attackers))
+        if num_byzantine < 0:
+            raise ExperimentConfigError("aggregation.num_byzantine must be >= 0.")
+        if total < 2 * num_byzantine + 3:
+            raise ExperimentConfigError(
+                "Krum requires num_clients >= 2 * num_byzantine + 3; "
+                f"got num_clients={total}, num_byzantine={num_byzantine}."
+            )
+        aggregation_cfg["num_byzantine"] = num_byzantine
+        if aggregation_name == "multi_krum":
+            max_selected = total - num_byzantine - 2
+            raw_selected = aggregation.get("num_selected")
+            selected = max_selected if raw_selected in (None, "") else int(raw_selected)
+            if not 1 <= selected <= max_selected:
+                raise ExperimentConfigError(
+                    f"aggregation.num_selected must be in [1, {max_selected}]."
+                )
+            aggregation_cfg["num_selected"] = selected
 
     storage_cfg = dict(STORAGE_DEFAULTS)
     storage_cfg.update(storage)
@@ -553,7 +582,7 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
             "mechanism": mechanism, "schedule": schedule,
             "model_attack": model_attack, "data_poisoning": data_poison,
         },
-        "aggregation": {"name": "fedavg", "implementation": "InstrumentedFedAvg"},
+        "aggregation": aggregation_cfg | {"implementation": "InstrumentedStrategy"},
         "storage": storage_cfg,
     }
 
@@ -689,7 +718,7 @@ def _build_experiment(resolved: Mapping[str, Any]):
         mk_cnn1d, mk_ft_transformer, mk_p4p_mlp, mk_stress_mlp,
     )
     from eiffel.models.supervized import mk_popoola_mlp
-    from eiffel.strategy.instrumented import InstrumentedFedAvg
+    from eiffel.strategy.instrumented import InstrumentedStrategy
 
     exp = resolved["experiment"]
     seed, rounds = int(exp["seed"]), int(exp["rounds"])
@@ -732,8 +761,9 @@ def _build_experiment(resolved: Mapping[str, Any]):
 
     storage = dict(resolved["storage"])
     strategy = partial(
-        InstrumentedFedAvg, storage=storage,
+        InstrumentedStrategy, storage=storage,
         model_attack=dict(resolved["attack"]["model_attack"]),
+        aggregation=dict(resolved["aggregation"]),
         num_rounds=rounds, seed=seed,
     )
     training = resolved["training"]
