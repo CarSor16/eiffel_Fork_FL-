@@ -1,7 +1,8 @@
 # FL security extensions
 
-This branch keeps Eiffel's Hydra/Flower/TensorFlow architecture and adds model-poisoning,
-round-level auditing, compact HDF5 persistence, and extra NIDS models.
+This branch keeps Eiffel's Flower/TensorFlow learning stack, replaces Hydra with a
+direct TOML/Python configuration layer, and adds model-poisoning, round-level auditing,
+compact HDF5 persistence, and extra NIDS models.
 
 ## What is saved
 
@@ -23,13 +24,13 @@ to reduce storage. HDF5 gzip compression is applied inside the single file.
 
 ## Models
 
-Hydra model choices:
+TOML model choices (`[model].name`):
 
-```bash
-model=popoola
-model=p4p_mlp
-model=cnn1d
-model=ft_transformer
+```text
+popoola
+p4p_mlp
+cnn1d
+ft_transformer
 ```
 
 The default remains the original Popoola-style MLP, so original Eiffel experiments can
@@ -74,12 +75,15 @@ Every model-attack YAML has a `schedule` section. It supports:
 - `on_off`
 - `gradual`
 
-Example command-line overrides:
+Equivalent TOML schedule configuration:
 
-```bash
-model_attack=sign_flip \
-model_attack.schedule.type=late \
-model_attack.schedule.start_round=6
+```toml
+[attack]
+mechanism = "sign_flip"
+
+[attack.schedule]
+type = "late"
+start_round = 6
 ```
 
 or
