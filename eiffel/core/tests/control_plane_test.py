@@ -141,3 +141,36 @@ def test_status_view_reads_resolved_profile_and_latest_event(tmp_path: Path):
     assert "Aggregation  : median" in rendered
     assert "Defense      : norm_clipping" in rendered
     assert "Accuracy     : 0.900000" in rendered
+
+
+def test_tui_honors_custom_control_paths_and_disabled_guard(tmp_path: Path):
+    (tmp_path / "resolved_profile.json").write_text(
+        json.dumps(
+            {
+                "control": {
+                    "enabled": True,
+                    "path": "runtime/live-control.json",
+                    "events_path": "runtime/live-events.jsonl",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    path = publish_changes(
+        tmp_path,
+        ["aggregation.name=median"],
+        apply_from_round=2,
+    )
+    assert path == tmp_path / "runtime" / "live-control.json"
+    assert path.exists()
+
+    (tmp_path / "resolved_profile.json").write_text(
+        json.dumps({"control": {"enabled": False}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeControlError, match="disabled"):
+        publish_changes(
+            tmp_path,
+            ["aggregation.name=fedavg"],
+            apply_from_round=3,
+        )
