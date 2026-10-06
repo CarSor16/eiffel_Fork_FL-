@@ -376,7 +376,7 @@ class InstrumentedStrategy(FedAvg):
             submitted_updates,
             self.defense_cfg,
         )
-        audits = audit_updates(defended_updates)
+        audits = audit_updates(submitted_updates)
 
         for idx, client in enumerate(clients):
             malicious = malicious_mask[idx]
@@ -398,8 +398,13 @@ class InstrumentedStrategy(FedAvg):
             self.store.save_client(
                 int(server_round),
                 cid,
-                submitted_update=defended_updates[idx],
+                submitted_update=submitted_updates[idx],
                 pre_attack_update=pre_updates[idx] if model_changed else None,
+                post_defense_update=(
+                    defended_updates[idx]
+                    if self.defense_cfg.get("name") != "none"
+                    else None
+                ),
                 audit=audits[idx],
                 probabilities=probabilities[idx],
                 logits=logits[idx],
