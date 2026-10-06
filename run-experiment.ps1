@@ -23,14 +23,14 @@ param(
     [string]$Suite = "none",
 
     [Parameter(ValueFromRemainingArguments=$true)]
-    [string[]]$HydraOverrides
+    [string[]]$Overrides
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProfilesDir = Join-Path $Root "experiments\toml"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
-$LauncherVersion = "2026-10-04-real-datasets-1"
+$LauncherVersion = "2026-10-06-direct-toml-1"
 
 # Keep the console focused on experiment progress. This warning comes from Ray's
 # compatibility layer and is repeated once per worker; it does not affect the run.
@@ -82,38 +82,18 @@ function Resolve-Profile([string]$Name) {
 }
 
 function Invoke-Profile([string]$Path, [switch]$ValidateOnly) {
-    $Args = @("-m", "eiffel.toml_runner", $Path)
+    $Args = @("-m", "eiffel.direct_runner", $Path)
     if ($MaxConcurrentClients -gt 0) {
-        $Args += "++experiment.max_concurrent_clients=$MaxConcurrentClients"
+        $Args += @("--max-concurrent-clients", "$MaxConcurrentClients")
     }
 
-    $ProfileBaseName = [System.IO.Path]::GetFileNameWithoutExtension($Path)
-    $HasExplicitRunDir = $false
-    if ($HydraOverrides) {
-        $HasExplicitRunDir = @(
-            $HydraOverrides | Where-Object { $_ -like "hydra.run.dir=*" }
-        ).Count -gt 0
-    }
-    if (-not $HasExplicitRunDir) {
-        $DatasetRunRoot = $null
-        if ($ProfileBaseName -like "mirage_*") {
-            $DatasetRunRoot = "mirage"
-        } elseif ($ProfileBaseName -like "cesnet_top50_*") {
-            $DatasetRunRoot = "cesnet/top50"
-        } elseif ($ProfileBaseName -like "ciciot_binary_*") {
-            $DatasetRunRoot = "ciciot/binary"
-        } elseif ($ProfileBaseName -like "ciciot_family_*") {
-            $DatasetRunRoot = "ciciot/family"
-        } elseif ($ProfileBaseName -like "ciciot_fine_*") {
-            $DatasetRunRoot = "ciciot/fine"
+    if ($Overrides) {
+        foreach ($Override in $Overrides) {
+            if ($Override -like "-*") {
+                throw "Experiment overrides use dotted.path=value syntax, not launcher switches: $Override"
+            }
+            $Args += @("--set", $Override)
         }
-        if ($DatasetRunRoot) {
-            $Args += 'hydra.run.dir=${anchor:}/outputs/' + $DatasetRunRoot + '/${now:%Y-%m-%d}/${now:%H-%M-%S}'
-        }
-    }
-
-    if ($HydraOverrides) {
-        $Args += $HydraOverrides
     }
     if ($ValidateOnly) {
         $Args += "--dry-run"
@@ -201,8 +181,8 @@ function Show-AttackHelp {
     Write-Host "  storage: enabled, path, compression, capture_inference, capture_logits,"
     Write-Host "           capture_probe_features, capture_global_inference, probe_size"
     Write-Host ""
-    Write-Host "Hydra remains the backend. TOML is translated to Hydra overrides, so ad-hoc"
-    Write-Host "Hydra overrides can still be appended to any .\run.cmd experiment command."
+    Write-Host "TOML is the single configuration backend. Optional overrides use"
+    Write-Host "dotted.path=value, for example: experiment.rounds=5 attack.strength=2.0"
 }
 
 $Profiles = Get-Profiles
@@ -212,8 +192,8 @@ if ($Version) {
     exit 0
 }
 
-if (-not $Profile -and $HydraOverrides) {
-    $UnknownOptions = @($HydraOverrides | Where-Object { $_ -like "-*" })
+if (-not $Profile -and $Overrides) {
+    $UnknownOptions = @($Overrides | Where-Object { $_ -like "-*" })
     if ($UnknownOptions.Count -gt 0) {
         throw "Unknown launcher option(s): $($UnknownOptions -join ', '). Run '.\run.cmd -List' or update the repository."
     }
@@ -287,7 +267,7 @@ try {
         $env:TF_CPP_MIN_LOG_LEVEL = "2"
         & $Python -m pip check
         if ($LASTEXITCODE -ne 0) { throw "pip check found missing or incompatible dependencies." }
-        & $Python -c "import sys, importlib.metadata, pkg_resources, absl, tensorflow, flwr, hydra, h5py, numpy, google.protobuf, eiffel; assert sys.version_info[:2] == (3,10), sys.version; assert tensorflow.__version__.startswith('2.10.'), tensorflow.__version__; assert flwr.__version__ == '1.5.0', flwr.__version__; print('Python:', sys.version.split()[0]); print('setuptools:', importlib.metadata.version('setuptools')); print('absl-py:', importlib.metadata.version('absl-py')); print('TensorFlow:', tensorflow.__version__); print('Flower:', flwr.__version__); print('NumPy:', numpy.__version__); print('Protobuf:', google.protobuf.__version__); print('h5py:', h5py.__version__); print('pkg_resources: OK'); print('Imports: OK')"
+        & $Python -c "import sys, importlib.metadata, pkg_resources, absl, tensorflow, flwr, h5py, numpy, google.protobuf, eiffel; assert sys.version_info[:2] == (3,10), sys.version; assert tensorflow.__version__.startswith('2.10.'), tensorflow.__version__; assert flwr.__version__ == '1.5.0', flwr.__version__; print('Python:', sys.version.split()[0]); print('setuptools:', importlib.metadata.version('setuptools')); print('absl-py:', importlib.metadata.version('absl-py')); print('TensorFlow:', tensorflow.__version__); print('Flower:', flwr.__version__); print('NumPy:', numpy.__version__); print('Protobuf:', google.protobuf.__version__); print('h5py:', h5py.__version__); print('pkg_resources: OK'); print('Imports: OK')"
         if ($LASTEXITCODE -ne 0) { throw "Environment import check failed." }
 
         foreach ($DoctorName in @(
@@ -321,7 +301,7 @@ try {
             "ciciot_fine_clean"
         )) {
             Write-Host ""
-            Write-Host "Checking TOML -> Hydra translation: $DoctorName"
+            Write-Host "Checking direct TOML configuration: $DoctorName"
             Invoke-Profile (Resolve-Profile $DoctorName) -ValidateOnly
         }
         Write-Host ""
