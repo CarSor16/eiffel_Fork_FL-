@@ -101,6 +101,51 @@ def test_dataset_override_reuses_same_profile_without_dataset_specific_edits():
     assert resolved["model"]["num_classes"] == 50
 
 
+
+@pytest.mark.parametrize(
+    ("name", "extra"),
+    [
+        ("fedavg", {}),
+        ("median", {}),
+        ("trimmed_mean", {"trim_ratio": 0.2}),
+        ("krum", {"num_byzantine": 1}),
+        ("multi_krum", {"num_byzantine": 1, "num_selected": 2}),
+    ],
+)
+def test_aggregation_backends_resolve_from_same_profile(name, extra):
+    profile = _portable_profile("synthetic_stress")
+    profile["aggregation"] = {"name": name, **extra}
+    resolved = resolve_profile(profile)
+    assert resolved["aggregation"]["name"] == name
+    assert resolved["aggregation"]["implementation"] == "InstrumentedStrategy"
+    for key, value in extra.items():
+        assert resolved["aggregation"][key] == value
+
+
+def test_aggregation_shorthand_switches_backend_without_profile_edit():
+    base = _portable_profile("synthetic_stress")
+    switched = apply_overrides(base, ["aggregation=median"])
+    resolved = resolve_profile(switched)
+    assert resolved["aggregation"]["name"] == "median"
+
+
+def test_krum_defaults_byzantine_bound_to_configured_attackers():
+    profile = _portable_profile("synthetic_stress")
+    profile["aggregation"] = {"name": "krum"}
+    resolved = resolve_profile(profile)
+    assert resolved["experiment"]["num_attackers"] == 2
+    assert resolved["aggregation"]["num_byzantine"] == 2
+
+
+def test_krum_rejects_impossible_client_byzantine_configuration():
+    profile = _portable_profile("synthetic_stress")
+    profile["experiment"]["num_clients"] = 4
+    profile["attack"]["malicious_fraction"] = 0.25
+    profile["aggregation"] = {"name": "krum", "num_byzantine": 1}
+    with pytest.raises(ExperimentConfigError, match="2 \* num_byzantine \+ 3"):
+        resolve_profile(profile)
+
+
 def test_sign_flip_resolves_to_plain_runtime_config():
     resolved = resolve_profile({
         "experiment": {"seed": 2026, "num_clients": 10, "rounds": 20},
