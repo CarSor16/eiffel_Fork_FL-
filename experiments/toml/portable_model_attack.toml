@@ -1,0 +1,41 @@
+# Dataset-portable model-poisoning profile.
+# The direct runtime infers task, class count, partitioner and default model from
+# dataset.name. Reuse this file across datasets with CLI overrides, e.g.:
+#   .\run.cmd portable_model_attack dataset=cesnet
+#   .\run.cmd portable_model_attack dataset=ciciot_family attack=gaussian_noise
+#
+# Explicit TOML values still override the inferred dataset defaults.
+
+[experiment]
+name = "portable-model-attack"
+seed = 2026
+num_clients = 10
+rounds = 30
+
+[dataset]
+name = "synthetic_stress"
+
+[training]
+local_epochs = 1
+
+[attack]
+mechanism = "sign_flip"
+malicious_fraction = 0.2
+
+[attack.schedule]
+type = "continuous"
+
+[aggregation]
+name = "fedavg"
+
+[storage]
+enabled = true
+path = "round_state.h5"
+compression = "gzip"
+compression_level = 4
+flush_each_round = true
+capture_inference = true
+capture_logits = true
+capture_probe_features = true
+capture_global_inference = true
+probe_size = 256
