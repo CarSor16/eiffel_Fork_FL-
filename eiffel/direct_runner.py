@@ -361,6 +361,7 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     storage = dict(_table(profile, "storage"))
     aggregation = dict(_table(profile, "aggregation"))
     defense = dict(_table(profile, "defense"))
+    control = dict(_table(profile, "control"))
 
     total = int(experiment.get("num_clients", 10))
     rounds = int(experiment.get("rounds", 10))
@@ -633,6 +634,12 @@ def resolve_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
         },
         "aggregation": aggregation_cfg | {"implementation": "InstrumentedStrategy"},
         "defense": defense_cfg,
+        "control": {
+            "enabled": bool(control.get("enabled", False)),
+            "path": str(control.get("path", "control.json")),
+            "events_enabled": bool(control.get("events_enabled", True)),
+            "events_path": str(control.get("events_path", "events.jsonl")),
+        },
         "storage": storage_cfg,
     }
 
@@ -815,6 +822,7 @@ def _build_experiment(resolved: Mapping[str, Any]):
         model_attack=dict(resolved["attack"]["model_attack"]),
         aggregation=dict(resolved["aggregation"]),
         defense=dict(resolved["defense"]),
+        control=dict(resolved.get("control", {})),
         model_fn=model_fn,
         num_rounds=rounds, seed=seed,
     )
