@@ -20,6 +20,7 @@ from flwr.server.strategy import FedAvg
 
 from eiffel.analysis.update_audit import audit_updates
 from eiffel.attacks.model import apply_round_attack
+from eiffel.control import ControlPlane, EventStream, apply_changes
 from eiffel.storage import RoundStore, decode_array
 from eiffel.strategy.aggregation import aggregate_updates, canonical_aggregation_name
 from eiffel.strategy.defense import (
@@ -72,6 +73,7 @@ class InstrumentedStrategy(FedAvg):
         model_attack: Mapping[str, Any] | None = None,
         aggregation: Mapping[str, Any] | None = None,
         defense: Mapping[str, Any] | None = None,
+        control: Mapping[str, Any] | None = None,
         model_fn: Any | None = None,
         num_rounds: int | None = None,
         seed: int = 0,
@@ -91,6 +93,15 @@ class InstrumentedStrategy(FedAvg):
             str(self.defense_cfg.get("name", "none"))
         )
         self.model_fn = model_fn
+        self.control_cfg = _plain(control or {})
+        self.control_plane = ControlPlane(
+            self.control_cfg.get("path", "control.json"),
+            enabled=bool(self.control_cfg.get("enabled", False)),
+        )
+        self.events = EventStream(
+            self.control_cfg.get("events_path", "events.jsonl"),
+            enabled=bool(self.control_cfg.get("events_enabled", True)),
+        )
         self.num_rounds = num_rounds
         self.seed = int(seed)
         self._round_log_state: dict[int, dict[str, Any]] = {}
@@ -111,6 +122,45 @@ class InstrumentedStrategy(FedAvg):
                 for x in parameters_to_ndarrays(initial_parameters)
             ]
             self.store.save_global(0, self._global_weights)
+
+    def _apply_runtime_controls(self, server_round: int) -> None:
+        pending = self.control_plane.read_for_round(int(server_round))
+        if pending is None:
+            return
+        revision, changes = pending
+        apply_changes(
+            attack=self.attack_cfg,
+            aggregation=self.aggregation_cfg,
+            defense=self.defense_cfg,
+            changes=changes,
+        )
+        self.aggregation_cfg["name"] = canonical_aggregation_name(
+            str(self.aggregation_cfg.get("name", "fedavg"))
+        )
+        self.defense_cfg["name"] = canonical_defense_name(
+            str(self.defense_cfg.get("name", "none"))
+        )
+        self.events.emit(
+            "control_applied",
+            round=int(server_round),
+            revision=int(revision),
+            changes=dict(changes),
+            attack=str(self.attack_cfg.get("mechanism", "none")),
+            aggregation=str(self.aggregation_cfg.get("name", "fedavg")),
+            defense=str(self.defense_cfg.get("name", "none")),
+        )
+
+    def configure_fit(self, server_round, parameters, client_manager):
+        self._apply_runtime_controls(int(server_round))
+        self.events.emit(
+            "round_start",
+            round=int(server_round),
+            total_rounds=int(self.num_rounds or server_round),
+            attack=str(self.attack_cfg.get("mechanism", "none")),
+            aggregation=str(self.aggregation_cfg.get("name", "fedavg")),
+            defense=str(self.defense_cfg.get("name", "none")),
+        )
+        return super().configure_fit(server_round, parameters, client_manager)
 
     @staticmethod
     def _extract_probe_payload(
@@ -474,6 +524,15 @@ class InstrumentedStrategy(FedAvg):
             )
         aggregated = ndarrays_to_parameters(self._global_weights)
         self.store.save_global(int(server_round), self._global_weights)
+        self.events.emit(
+            "fit_aggregated",
+            round=int(server_round),
+            attack=str(mechanism),
+            attack_multiplier=float(round_attack_multiplier),
+            malicious_clients=int(malicious_clients),
+            aggregation=str(self.aggregation_cfg.get("name", "fedavg")),
+            defense=str(self.defense_cfg.get("name", "none")),
+        )
 
         metrics = {}
         if self.fit_metrics_aggregation_fn:
@@ -616,6 +675,18 @@ class InstrumentedStrategy(FedAvg):
         # A round is complete only after both fit aggregation and distributed
         # evaluation (including persisted global inference) have succeeded.
         self.store.mark_round_complete(int(server_round))
+        self.events.emit(
+            "round_complete",
+            round=int(server_round),
+            total_rounds=int(self.num_rounds or server_round),
+            loss=loss,
+            metrics=summary,
+            attack=str(mechanism),
+            attack_multiplier=float(multiplier),
+            malicious_clients=int(malicious_clients),
+            aggregation=str(state.get("aggregation", self.aggregation_cfg.get("name", "fedavg"))),
+            defense=str(state.get("defense", self.defense_cfg.get("name", "none"))),
+        )
         return aggregated
 
 
