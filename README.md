@@ -591,6 +591,38 @@ The default configuration is intentionally lightweight so it can be used in repe
 
 ---
 
+
+## Pluggable aggregation
+
+Aggregation is selected independently from the attack, dataset and model:
+
+```toml
+[aggregation]
+name = "fedavg"
+```
+
+Supported server-side backends are:
+
+- `fedavg`: sample-count weighted Federated Averaging;
+- `median`: coordinate-wise median;
+- `trimmed_mean`: coordinate-wise symmetric trimmed mean;
+- `krum`: single-update Krum selection;
+- `multi_krum`: average of the lowest-scoring Krum candidates.
+
+Examples:
+
+```powershell
+.\run.cmd portable_model_attack dataset=cesnet aggregation=median
+.\run.cmd portable_model_attack dataset=cesnet aggregation=trimmed_mean aggregation.trim_ratio=0.2
+.\run.cmd portable_model_attack dataset=cesnet aggregation=krum
+.\run.cmd portable_model_attack dataset=cesnet aggregation=multi_krum aggregation.num_selected=4
+```
+
+For Krum and Multi-Krum, `aggregation.num_byzantine` defaults to the configured
+number of malicious clients. It can be overridden explicitly. The runtime rejects
+configurations that violate Krum's minimum client-count requirement. The selected
+aggregation backend is stored in each HDF5 round metadata entry for reproducibility.
+
 ## Round-by-round experiment storage
 
 One of the main extensions of this fork is the ability to preserve the complete evolution of an FL run without creating thousands of individual files.
