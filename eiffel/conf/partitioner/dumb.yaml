@@ -1,4 +1,0 @@
-_target_: eiffel.datasets.partitioners.DumbPartitioner
-_partial_: true
-
-seed: ${seed}

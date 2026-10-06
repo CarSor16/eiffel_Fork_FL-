@@ -1,3 +1,0 @@
-# @package hydra.callbacks.mattermost
-_target_: eiffel.callbacks.notifications.MattermostCallback
-url: ???

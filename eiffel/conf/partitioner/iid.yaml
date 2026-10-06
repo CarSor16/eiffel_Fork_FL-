@@ -1,5 +1,0 @@
-_target_: eiffel.datasets.partitioners.IIDPartitioner
-_partial_: true
-
-class_column: "Attack"
-seed: ${seed}

@@ -1,9 +1,0 @@
-# @package model_attack
-enabled: true
-mechanism: targeted_family_poisoning
-target_family: ""
-target_amplification: 2.5
-target_mimicry_lambda: 0.15
-schedule:
-  type: continuous
-  start_round: 1
