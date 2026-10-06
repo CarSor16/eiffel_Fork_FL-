@@ -15,7 +15,6 @@ from flwr.common import ndarrays_to_parameters
 from flwr.server import Server, ServerConfig
 from flwr.server.strategy import FedAvg, Strategy
 from flwr.simulation import start_simulation
-from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
 from keras.models import Model
 
 from eiffel.core.errors import ConfigError
@@ -211,9 +210,6 @@ class Experiment:
 
     def run(self, **ray_kwargs) -> None:
         """Run the experiment."""
-        import sys
-
-        gettrace = getattr(sys, "gettrace", None)
         init_kwargs = (
             (ray_kwargs or {})
             | {
