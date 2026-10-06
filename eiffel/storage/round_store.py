@@ -263,8 +263,9 @@ class RoundStore:
         attack_mechanism: str,
         attack_multiplier: float,
         malicious_clients: int,
+        aggregation_name: str = "fedavg",
     ) -> None:
-        """Store compact round-level attack metadata."""
+        """Store compact round-level attack and aggregation metadata."""
         if self._h5 is None:
             return
         group = self._h5.require_group("rounds").require_group(
@@ -273,6 +274,7 @@ class RoundStore:
         group.attrs["attack_mechanism"] = str(attack_mechanism)
         group.attrs["attack_multiplier"] = np.float32(attack_multiplier)
         group.attrs["malicious_clients"] = int(malicious_clients)
+        group.attrs["aggregation"] = str(aggregation_name)
 
     def save_client(
         self,
