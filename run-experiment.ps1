@@ -184,6 +184,12 @@ function Show-AttackHelp {
     Write-Host "TOML is the single configuration backend. Optional overrides use"
     Write-Host "dotted.path=value, for example: experiment.rounds=5 attack.strength=2.0"
     Write-Host ""
+    Write-Host "Aggregation backends"
+    Write-Host "  fedavg | median | trimmed_mean | krum | multi_krum"
+    Write-Host "  Example: .\run.cmd portable_model_attack aggregation=median"
+    Write-Host "  Trimmed Mean: aggregation.trim_ratio"
+    Write-Host "  Krum/Multi-Krum: aggregation.num_byzantine; Multi-Krum also aggregation.num_selected"
+    Write-Host ""
     Write-Host "Dataset-portable profile"
     Write-Host "  Use portable_model_attack without rewriting task/model/partition per dataset:"
     Write-Host "    .\run.cmd portable_model_attack dataset=cesnet"
@@ -331,6 +337,7 @@ try {
         $TestFiles = @(
             "eiffel\core\tests\client_test.py",
             "eiffel\core\tests\model_attacks_test.py",
+            "eiffel\core\tests\aggregation_test.py",
             "eiffel\core\tests\label_flip_attack_test.py",
             "eiffel\core\tests\multiclass_models_test.py",
             "eiffel\core\tests\inference_capture_test.py",
