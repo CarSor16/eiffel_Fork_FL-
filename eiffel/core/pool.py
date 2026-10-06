@@ -62,11 +62,8 @@ class Pool:
 
         Parameters
         ----------
-        dataset : Dataset | str
-            The dataset used by the clients. If a DictConfig is provided, it should be a
-            valid OmegaConf configuration that can be passed to Hydra's instantiation
-            logic, and return a `Dataset` object. Otherwise, it should be a `Dataset`
-            object.
+        dataset : Dataset
+            Concrete dataset assigned to this pool.
         benign : int
             The number of benign clients in the pool.
         malicious : int, optional
@@ -103,8 +100,7 @@ class Pool:
 
         if not isinstance(dataset, Dataset):
             raise TypeError(
-                "Pool now requires a concrete Dataset object; Hydra call configs "
-                f"are no longer supported (got {type(dataset)})."
+                f"Pool requires a concrete Dataset object, got {type(dataset)}."
             )
 
         # Synthetic/replay datasets can provide an explicit train/test split in
