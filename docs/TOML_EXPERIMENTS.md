@@ -95,6 +95,63 @@ malicious_fraction = 0.2
 becomes 8 benign clients and 2 malicious clients.
 
 
+
+## Live terminal monitor and round-boundary controls
+
+Every run can emit a lightweight `events.jsonl` stream. Runtime mutation is disabled
+by default and can be enabled explicitly:
+
+```powershell
+.\run.cmd portable_model_attack control.enabled=true
+```
+
+While the run is active, a second terminal can show the live state:
+
+```powershell
+python -m eiffel.tui watch <run-directory>
+```
+
+or open the interactive terminal controller:
+
+```powershell
+python -m eiffel.tui interactive <run-directory>
+```
+
+Runtime changes are published atomically and applied only at the boundary before the
+requested FL round:
+
+```powershell
+python -m eiffel.tui set <run-directory> --round 8 aggregation.name=median
+python -m eiffel.tui set <run-directory> --round 12 attack.strength=2.0
+python -m eiffel.tui set <run-directory> --round 15 defense.name=norm_clipping defense.max_norm=5.0
+```
+
+The interactive mode accepts the same idea:
+
+```text
+set 8 aggregation.name=median
+set 12 attack.strength=2.0
+set 15 defense.name=norm_clipping defense.max_norm=5.0
+```
+
+Only server-side model-attack parameters, aggregation, and defenses are mutable during
+an active run. Dataset, model architecture, client population, partitioning and
+data-poisoning assignment are intentionally static because changing them mid-round would
+invalidate experiment semantics.
+
+The control protocol is file-based:
+
+```text
+run-directory/
+  resolved_profile.json
+  round_state.h5
+  events.jsonl
+  control.json
+```
+
+This separates the experiment engine from the frontend. A future Textual or web GUI can
+reuse the same event/control protocol without changing Flower or the experiment runtime.
+
 ## Pluggable aggregation
 
 Aggregation is selected independently from the attack, dataset and model:
