@@ -24,7 +24,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from omegaconf import OmegaConf
 
 DEFAULT_METRICS = (
     "accuracy",
@@ -67,28 +66,18 @@ def _infer_attack_label(h5_path: Path) -> str:
                     rounds[names[-1]].attrs.get("attack_mechanism", "none")
                 )
 
-    config_path = h5_path.parent / ".hydra" / "config.yaml"
+    config_path = h5_path.parent / "resolved_profile.json"
     if config_path.exists():
         try:
-            cfg = OmegaConf.load(config_path)
-            attack_cfg = cfg.get("model_attack", {}) or {}
-            mechanism = str(attack_cfg.get("mechanism", mechanism))
+            cfg = json.loads(config_path.read_text(encoding="utf-8"))
+            attack_cfg = cfg.get("attack", {}) or {}
+            model_attack = attack_cfg.get("model_attack", {}) or {}
+            mechanism = str(model_attack.get("mechanism", mechanism))
             schedule_cfg = attack_cfg.get("schedule", {}) or {}
             schedule = str(schedule_cfg.get("type", "continuous"))
-            n_attackers = int(cfg.get("num_attackers", 0))
-            poisoning = cfg.get("attacks", []) or []
-            if mechanism == "none" and n_attackers > 0 and len(poisoning) > 0:
-                first = poisoning[0]
-                profile_value = str(first.get("profile", ""))
-                poison_type = str(first.get("type", ""))
-                if profile_value not in {"", "0", "0.0", "clean"}:
-                    mechanism = "label_flip"
-                    if poison_type:
-                        mechanism += f"_{poison_type}"
-        except Exception:
-            # HDF5 metadata remains sufficient for model attacks. Explicit --run
-            # LABEL=PATH can always be used when a historical Hydra config is absent
-            # or cannot be parsed.
+            if mechanism == "none" and attack_cfg.get("data_poisoning"):
+                mechanism = "label_flip"
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
             pass
 
     label = "clean" if mechanism == "none" else mechanism
