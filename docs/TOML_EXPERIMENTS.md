@@ -32,14 +32,46 @@ Temporary overrides can be appended using `dotted.path=value`:
 python -m eiffel.direct_runner experiments\toml\smoke_sign_flip.toml model=cnn1d
 ```
 
+### Dataset-portable profiles
+
+For model-poisoning experiments you do not need a separate TOML copy for every
+dataset. The direct runtime has structural presets for every registered dataset and
+can infer, when omitted:
+
+- supervised task (`binary`, `family_aware`, or `multiclass`);
+- model output class count;
+- the required partitioner (`iid`, `dirichlet`, or `preassigned`);
+- a compatible default model.
+
+Use the committed portable profile and change only the dataset and attack when needed:
+
+```powershell
+.\run.cmd portable_model_attack dataset=cesnet
+.\run.cmd portable_model_attack dataset=ciciot_family attack=gaussian_noise
+.\run.cmd portable_model_attack dataset=mirage_app3 attack=min_max
+```
+
+The same works with the Python entrypoint:
+
+```powershell
+python -m eiffel.direct_runner experiments\toml\portable_model_attack.toml --set dataset=cesnet --dry-run
+```
+
+Explicit TOML fields always take precedence over inferred dataset defaults. This is
+useful for controlled ablations, while the portable form avoids repeating dataset
+boilerplate in normal experiments. Dataset-semantic attacks can still require a
+dataset-specific target (for example `targeted_family_poisoning` needs a valid
+`attack.targeted.target_family`, and multiclass label flipping needs an explicit
+source/destination mapping).
+
 ## TOML sections
 
 The direct runtime currently understands:
 
 - `[experiment]`: seed, total number of clients, rounds
 - `[dataset]`: registered dataset alias and dataset-specific parameters
-- `[partition]`: iid, dumb, niid_class, dirichlet
-- `[model]`: popoola/mlp, p4p_mlp, cnn1d, ft_transformer
+- `[partition]`: iid, dumb, niid_class, dirichlet, preassigned
+- `[model]`: popoola/mlp, p4p_mlp, cnn1d, ft_transformer, stress_mlp
 - `[training]`: local_epochs, learning_rate, batch_size
 - `[attack]`: mechanism, malicious_fraction, malicious_client_ids, strength and
   attack-specific parameters
@@ -83,16 +115,18 @@ imbalanced traffic families, a rare attack family, overlapping and multimodal cl
 informative/redundant/noise features, hard examples, client-specific covariate shift,
 small training-label noise, outliers, and a shifted common test distribution.
 
-Eiffel's supervised models are binary, so the six traffic families are retained in the
-`Attack` metadata while the training target is mapped to:
+The synthetic benchmark supports both binary and true multiclass training. In the
+default binary mode, the six traffic families are retained as metadata while the
+supervised target is mapped to:
 
 ```text
 Benign -> 0
 any attack family -> 1
 ```
 
-This keeps per-family recall/miss-rate analysis while remaining compatible with Eiffel's
-binary NIDS pipeline.
+This preserves per-family recall/miss-rate analysis for the Eiffel-compatible baseline.
+With `dataset.task = "multiclass"`, the same generator exposes the six families as the
+supervised classes and compatible models use a softmax output.
 
 For this dataset the generator itself creates the exact client shards. A
 `PreassignedPartitioner` therefore preserves the 5,000 samples/client instead of
