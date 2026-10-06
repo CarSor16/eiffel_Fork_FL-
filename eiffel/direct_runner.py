@@ -204,11 +204,18 @@ def set_path(profile: dict[str, Any], dotted: str, value: Any) -> None:
 
 def apply_overrides(profile: Mapping[str, Any], values: list[str] | None) -> dict[str, Any]:
     result = copy.deepcopy(dict(profile))
+    shorthand = {
+        "model": "model.name",
+        "dataset": "dataset.name",
+        "partition": "partition.type",
+        "attack": "attack.mechanism",
+    }
     for raw in values or []:
         if "=" not in raw:
             raise ExperimentConfigError(f"Invalid override {raw!r}; expected path=value.")
         key, value = raw.split("=", 1)
-        set_path(result, key.strip(), parse_scalar(value.strip()))
+        key = shorthand.get(key.strip(), key.strip())
+        set_path(result, key, parse_scalar(value.strip()))
     return result
 
 
@@ -639,7 +646,7 @@ def _build_experiment(resolved: Mapping[str, Any]):
     pcfg = resolved["partition"]
     ptype = pcfg["type"]
     if ptype == "dumb":
-        partitioner = DumbPartitioner
+        partitioner = partial(DumbPartitioner)
     elif ptype == "iid":
         partitioner = partial(IIDPartitioner, class_column="Attack")
     elif ptype == "dirichlet":
