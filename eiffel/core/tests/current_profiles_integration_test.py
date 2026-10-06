@@ -289,6 +289,15 @@ def test_defense_runs_end_to_end(
         if isinstance(recorded, bytes):
             recorded = recorded.decode("utf-8")
         assert str(recorded) == defense_name
+        clients = h5["clients"]["round_0001"]
+        malicious = [
+            client
+            for client in clients.values()
+            if bool(int(client.attrs.get("malicious", 0)))
+        ]
+        assert malicious
+        assert "submitted_update" in malicious[0]
+        assert "post_defense_update" in malicious[0]
         assert int(h5["meta"].attrs["last_complete_round"]) == 1
 
 
