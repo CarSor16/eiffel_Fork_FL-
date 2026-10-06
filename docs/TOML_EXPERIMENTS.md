@@ -2,9 +2,9 @@
 
 This fork supports the TOML experiment workflow used by the previous Flower attack lab.
 
-Eiffel still uses Hydra internally. The TOML runner is a compatibility layer: it reads
-one experiment profile, validates the fields, translates them to Hydra overrides, and
-starts the normal Eiffel entrypoint.
+TOML is the single experiment configuration backend. The runner reads one profile,
+validates and normalizes it, constructs the corresponding Python objects directly,
+and starts the normal Flower-based Eiffel experiment.
 
 ## Run
 
@@ -20,13 +20,13 @@ or directly:
 python -m eiffel.toml_runner experiments\toml\smoke_clean.toml
 ```
 
-Validate/inspect the generated Eiffel command without starting Flower:
+Validate/inspect the resolved experiment configuration without starting Flower:
 
 ```powershell
 python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml --dry-run
 ```
 
-Extra Hydra overrides can be appended after the TOML path:
+Temporary overrides can be appended using `dotted.path=value`:
 
 ```powershell
 python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml model=cnn1d
@@ -37,7 +37,7 @@ python -m eiffel.toml_runner experiments\toml\smoke_sign_flip.toml model=cnn1d
 The compatibility layer currently understands:
 
 - `[experiment]`: seed, total number of clients, rounds
-- `[dataset]`: dataset alias or explicit Hydra group
+- `[dataset]`: registered dataset alias and dataset-specific parameters
 - `[partition]`: iid, dumb, niid_class, dirichlet
 - `[model]`: popoola/mlp, p4p_mlp, cnn1d, ft_transformer
 - `[training]`: local_epochs, learning_rate, batch_size
@@ -162,20 +162,16 @@ toniot / ton-iot         -> nfv2/sampled/toniot
 botiot                    -> nfv2/sampled/botiot
 ```
 
-A profile can bypass aliases with:
-
-```toml
-[dataset]
-hydra_group = "nfv2/sampled/cicids"
-```
-
-The corresponding dataset file must exist under Eiffel's expected `data/` path.
+Dataset aliases are resolved by the direct Python dataset registry. To add a new dataset,
+add its loader/registry entry to the runtime and expose its parameters through TOML.
+The corresponding dataset files remain outside Git and must exist at the configured or
+registered data path.
 
 ## Why the old TOMLs were adapted
 
 The previous lab used a synthetic multiclass dataset and its own partition/model/attack
-runtime. Eiffel is a binary NIDS framework with its own dataset loaders and Hydra
-configuration.
+runtime. Eiffel has its own dataset loaders and now uses a direct TOML/Python
+configuration layer.
 
 The profiles in `experiments/toml/` therefore preserve the old experiment style and
 attack parameters, but use Eiffel-compatible datasets/models.
@@ -298,7 +294,7 @@ per-family recall comparisons, CSV exports and multi-seed mean/std aggregation.
 
 The thesis-scale real-data profiles use the full NF-V2 representations of
 CSE-CIC-IDS2018 and UNSW-NB15. They are named `dc_cicids_*` and `dc_nb15_*`.
-The data-center Hydra groups read the file paths from `EIFFEL_CICIDS_PATH` and
+The data-center dataset loaders read file paths from `EIFFEL_CICIDS_PATH` and
 `EIFFEL_NB15_PATH`, so large datasets can remain on shared/scratch storage instead
 of inside the Git repository.
 
